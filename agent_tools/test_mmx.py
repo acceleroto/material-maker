@@ -237,6 +237,12 @@ class TestExportRun(unittest.TestCase):
         self.assertEqual(mmx.wait_for_result(run_name="r", runs_dir=runs, timeout=1), {"ok": True})
         self.assertFalse(mmx.wait_for_result(self.t / "nowhere", timeout=0.2)["ok"])
 
+    def test_nested_run_name(self):
+        self.assertEqual(mmx.next_iter_dir("1.3/desert", self.t).parent, self.t / "1.3" / "desert")
+        for bad in ("../x", "a/../b", "/abs", "a//b", "a/"):
+            with self.assertRaises(SystemExit):
+                mmx.run_iteration(self.t / "none.ptex", bad, runs_dir=self.t)
+
 
 try:
     import PIL  # noqa: F401

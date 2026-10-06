@@ -1503,11 +1503,15 @@ def next_iter_dir(run_name, runs_dir=None):
             n += 1
 
 
+RUN_NAME_RE = re.compile(r"[\w.-]+(/[\w.-]+)*")
+
+
 def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=None, note=None):
     import shutil
     import time
-    if not re.fullmatch(r"[\w.-]+", run_name):
-        raise SystemExit("mmx run: --run-name may only use letters, digits, '_', '-', '.'")
+    if not RUN_NAME_RE.fullmatch(run_name) or any(c in (".", "..") for c in run_name.split("/")):
+        raise SystemExit("mmx run: --run-name may only use letters, digits, '_', '-', '.' and '/' "
+                         "between parts (e.g. 1.3/desert)")
     ptex = Path(ptex).resolve()
     d = next_iter_dir(run_name, runs_dir)
     _write_json(d / STATUS_NAME, {"state": "running", "started": time.time(), "ptex": str(ptex)})
@@ -1613,7 +1617,7 @@ def main(argv=None):
     p.set_defaults(fn=cmd_sheet)
     p = sub.add_parser("run", help="one iteration: agent_runs/<run>/iter_NNN/ with ptex copy, out/, sheet.png")
     p.add_argument("ptex")
-    p.add_argument("--run-name", required=True)
+    p.add_argument("--run-name", required=True, help="agent_runs/<name>/; '/' nests, e.g. 1.3/desert")
     p.add_argument("--note", help="text saved as note.md in the iteration dir (what changed and why)")
     export_opts(p)
     p.set_defaults(fn=cmd_run)
