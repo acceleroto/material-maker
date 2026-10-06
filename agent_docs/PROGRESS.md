@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 0.4 (complete)
+**Current session:** 1.1 (in progress)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -35,7 +35,8 @@
   ("not amazing, but a good start") → continue to Phase 1 (normal path).
 
 ## In progress
-- None.
+- 1.1: `agent_tools/mmx.py catalog` done (→ `agent_tools/catalog.json`, 411 types; `agent_docs/NODES.md`,
+  ~440 lines, generated). Next: `mmx validate` + tests, docs.
 
 ## Blockers
 - None hard. Open question: why `Bricks.repeat`/`rows`/`columns` edits are ignored on export
