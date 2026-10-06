@@ -1,0 +1,14 @@
+# mmx config: how `mmx export` / `mmx run` call Material Maker.
+# Paths must be absolute. Override the file with $MMX_CONFIG or --config.
+
+mode = "release"        # "release": the installed app. "source" (Godot + this repo) arrives in Phase 2.
+target = "Unity/URP"    # default --target
+timeout = 180           # seconds before a hung export is killed (a normal export takes ~5 s)
+
+[release]
+binary = "/Applications/Material Maker.app/Contents/MacOS/Material Maker"
+data_dir = "/Applications/Material Maker.app/Contents/MacOS"   # nodes/ used to predict output files
+
+[source]                # Phase 2, not used yet
+godot = "/Applications/Godot.app/Contents/MacOS/Godot"
+project = "/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker"

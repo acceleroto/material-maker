@@ -1102,6 +1102,476 @@ def cmd_validate(args):
     return 0 if result["ok"] else 1
 
 
+# ---------------------------------------------------------------------------
+# Config (agent_tools/mmx.toml)
+# ---------------------------------------------------------------------------
+
+CONFIG_PATH = REPO / "agent_tools" / "mmx.toml"
+RUNS_DIR = REPO / "agent_runs"
+VENV_PYTHON = REPO / "agent_tools" / ".venv" / "bin" / "python"
+RESULT_NAME = "mmx_result.json"   # written by export/run; polled by `mmx wait`
+STATUS_NAME = "mmx_status.json"   # written by run while in progress
+
+DEFAULT_CONFIG = {
+    "mode": "release",
+    "target": "Unity/URP",
+    "timeout": 180,
+    "release": {
+        "binary": "/Applications/Material Maker.app/Contents/MacOS/Material Maker",
+        "data_dir": "/Applications/Material Maker.app/Contents/MacOS",
+    },
+    "source": {
+        "godot": "/Applications/Godot.app/Contents/MacOS/Godot",
+        "project": str(REPO),
+    },
+}
+
+
+def load_config(path=None):
+    """Defaults merged with mmx.toml (or $MMX_CONFIG / --config)."""
+    import os
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    path = Path(path or os.environ.get("MMX_CONFIG") or CONFIG_PATH)
+    if path.exists():
+        import tomllib  # Python 3.11+
+        with open(path, "rb") as f:
+            user = tomllib.load(f)
+        for k, v in user.items():
+            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                cfg[k].update(v)
+            else:
+                cfg[k] = v
+    return cfg
+
+
+def export_command(cfg, ptex, out_dir, target):
+    """argv for one CLI export. Paths must be absolute (the app changes its cwd on macOS)."""
+    mode = cfg["mode"]
+    if mode == "release":
+        exe = cfg["release"]["binary"]
+        prefix = [exe]
+    elif mode == "source":
+        raise SystemExit("mmx: mode = \"source\" (Godot + repo) is planned for Phase 2; use mode = \"release\"")
+    else:
+        raise SystemExit("mmx: unknown mode %r in config" % mode)
+    # --target, never -t (Godot swallows -t); --export-material, never --export (Godot project export).
+    return prefix + ["--export-material", "--target", target, "-o", str(out_dir), str(ptex)]
+
+
+def mmg_dirs(cfg):
+    dirs = []
+    if cfg["mode"] == "release":
+        dirs.append(Path(cfg["release"]["data_dir"]) / "nodes")
+    dirs.append(NODES_DIR)
+    return [d for d in dirs if d.is_dir()]
+
+
+# ---------------------------------------------------------------------------
+# Expected export files (mirrors MMGenMaterial.export_material)
+# ---------------------------------------------------------------------------
+
+_COND_TOKEN = re.compile(r"\(|\)|\w+")
+
+
+def eval_condition(cond, connected):
+    """Evaluate an export `conditions` string such as "$(connected:a_tex) or $(connected:b_tex)".
+    Returns True/False, or None if it uses something we don't model."""
+    s = re.sub(r"\$\(connected:(\w+)\)", lambda m: "True" if m.group(1) in connected else "False", cond)
+    if "$(" in s or any(t not in ("True", "False", "and", "or", "not", "(", ")") for t in _COND_TOKEN.findall(s)):
+        return None
+    try:
+        return bool(eval(s, {"__builtins__": {}}, {}))
+    except Exception:
+        return None
+
+
+def find_material_node(ptex_data, cfg):
+    """(node, shader_model) of the first top-level node with export profiles, else (None, None)."""
+    for n in ptex_data.get("nodes", []):
+        sm = n.get("shader_model")
+        if not (isinstance(sm, dict) and "exports" in sm):
+            sm = None
+            for d in mmg_dirs(cfg):
+                f = d / (str(n.get("type", "")) + ".mmg")
+                if f.exists():
+                    sm = load_json_lenient(f).get("shader_model")
+                    break
+        if isinstance(sm, dict) and sm.get("exports"):
+            return n, sm
+    return None, None
+
+
+def expected_files(ptex_path, out_dir, target, cfg):
+    """{"required": [...], "optional": [...], "targets": [...], "material_node": name} or {"error": ...}."""
+    data = load_json_lenient(ptex_path)
+    node, sm = find_material_node(data, cfg)
+    if node is None:
+        return {"error": "no material node with export targets found at the top level of the graph"}
+    targets = sorted(sm["exports"])
+    if target not in sm["exports"]:
+        close = difflib.get_close_matches(target, targets, n=3, cutoff=0.3)
+        return {"error": "material node %r (type %s) has no export target %r; did you mean %s? Available: %s"
+                % (node["name"], node.get("type"), target, close, targets)}
+    inputs = sm.get("inputs", [])
+    ports = {c.get("to_port") for c in data.get("connections", []) if c.get("to") == node["name"]}
+    connected = {inputs[i]["name"] for i in ports if isinstance(i, int) and 0 <= i < len(inputs)}
+    prefix = str(Path(out_dir) / Path(ptex_path).stem)
+    ctx = {"$(path_prefix)": prefix, "$(file_prefix)": Path(ptex_path).stem,
+           "$(dir_prefix)": str(out_dir), "$(path_separator)": "/"}
+    required, optional = [], []
+    for f in sm["exports"][target].get("files", []):
+        name = f.get("file_name", "")
+        for k, v in ctx.items():
+            name = name.replace(k, v)
+        if "$(" in name:
+            continue
+        cond = eval_condition(f["conditions"], connected) if "conditions" in f else True
+        if cond is False:
+            continue
+        (required if cond else optional).append(name)
+    return {"required": required, "optional": optional, "targets": targets,
+            "material_node": node["name"], "connected_inputs": sorted(connected)}
+
+
+# ---------------------------------------------------------------------------
+# export
+# ---------------------------------------------------------------------------
+
+
+def _write_json(path, data):
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False))
+    tmp.replace(path)  # atomic, so `mmx wait` never reads half a file
+
+
+def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=False, skip_validate=False):
+    """Validate, export with the MM binary, check outputs. Returns a JSON-able summary
+    (also written to <out_dir>/mmx_result.json)."""
+    import os
+    import signal
+    import subprocess
+    import time
+    cfg = cfg or load_config()
+    target = target or cfg["target"]
+    timeout = float(timeout or cfg["timeout"])
+    ptex = Path(ptex).resolve()
+    out_dir = Path(out_dir).resolve()
+    res = {"ok": False, "stage": "validate", "ptex": str(ptex), "out_dir": str(out_dir), "target": target}
+
+    def done(**kw):
+        res.update(kw)
+        if out_dir.is_dir():
+            _write_json(out_dir / RESULT_NAME, res)
+        return res
+
+    if not ptex.exists():
+        return done(error="ptex not found")
+    if not skip_validate:
+        v = validate_file(ptex)
+        res["validation"] = {"errors": v["errors"], "warnings": len(v["warnings"])}
+        if not v["ok"]:
+            return done(error="validation failed; fix the errors (mmx validate %s)" % ptex)
+    res["stage"] = "plan"
+    exp = expected_files(ptex, out_dir, target, cfg)
+    if "error" in exp:
+        return done(error=exp["error"])
+    res["connected_inputs"] = exp["connected_inputs"]
+
+    out_dir.mkdir(parents=True, exist_ok=True)  # MM only creates the last level, and hangs on failure
+    (out_dir / RESULT_NAME).unlink(missing_ok=True)
+    # MM skips existing `prompt_overwrite` files (.mat, .meta) in CLI mode, and old maps would hide
+    # a failed export: remove previous outputs first.
+    for f in exp["required"] + exp["optional"]:
+        if not (keep_meta and f.endswith(".meta")):
+            Path(f).unlink(missing_ok=True)
+
+    res["stage"] = "export"
+    cmd = export_command(cfg, ptex, out_dir, target)
+    log_path = out_dir / "export.log"
+    res["log"] = str(log_path)
+    res["command"] = cmd
+    start = time.time()
+    with open(log_path, "w") as log:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                start_new_session=True)
+        try:
+            rc = proc.wait(timeout=timeout)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            rc = proc.wait()
+            timed_out = True
+    res["seconds"] = round(time.time() - start, 2)
+    res["exit_code"] = rc
+
+    log_text = log_path.read_text(errors="replace")
+    res["log_errors"] = [l.strip() for l in log_text.splitlines()
+                         if re.search(r"\bERROR\b|Error in expression|SCRIPT ERROR|Failed", l)][:20]
+    written, missing = [], []
+    for f in exp["required"] + exp["optional"]:
+        p = Path(f)
+        if p.exists() and (p.stat().st_mtime >= start - 1 or (keep_meta and f.endswith(".meta"))):
+            written.append({"file": p.name, "bytes": p.stat().st_size})
+        elif f in exp["required"]:
+            missing.append(p.name)
+    res["files"] = written
+    res["missing"] = missing
+    hints = []
+    if timed_out:
+        hints.append("timed out after %ss. If launched from Claude's Bash tool the app hangs in "
+                     "CAMetalLayer nextDrawable: run mmx via the Terminal panel (run_in_terminal)." % timeout)
+    elif not log_text.strip() and res["seconds"] < 3:
+        hints.append("app quit instantly with no output: add steam_appid.txt (4110830) next to the binary")
+    if hints:
+        res["hints"] = hints
+    if timed_out:
+        return done(error="timeout")
+    if missing:
+        return done(error="expected output files missing (see log_errors / %s)" % log_path)
+    return done(ok=True, stage="done")
+
+
+def cmd_export(args):
+    res = run_export(args.ptex, args.out, args.target, load_config(args.config), args.timeout,
+                     args.keep_meta, args.no_validate)
+    print(json.dumps(res, indent=1, ensure_ascii=False))
+    return 0 if res["ok"] else (1 if res["stage"] in ("validate", "plan") else 2)
+
+
+# ---------------------------------------------------------------------------
+# sheet (needs Pillow: agent_tools/.venv, see README)
+# ---------------------------------------------------------------------------
+
+# (file-name suffix, kind); longest suffixes first so "metal_smoothness" wins over "smoothness".
+MAP_SUFFIXES = [
+    ("metal_smoothness", "metal_smoothness"), ("orm", "orm"), ("base_color", "albedo"), ("basecolor", "albedo"),
+    ("albedo", "albedo"), ("diffuse", "albedo"), ("color", "albedo"), ("normal", "normal"),
+    ("height", "height"), ("depth", "height"), ("displacement", "height"),
+    ("roughness", "roughness"), ("smoothness", "smoothness"), ("metallic", "metallic"), ("metal", "metallic"),
+    ("occlusion", "ao"), ("ao", "ao"), ("emission", "emission"), ("opacity", "opacity"), ("sss", "sss"),
+]
+SHEET_ORDER = ["lit", "lit tiled 2x2", "albedo", "normal", "height", "roughness", "metallic", "ao",
+               "emission", "opacity", "sss"]
+
+
+def classify_maps(directory):
+    """{kind: Path} for the PNGs in an export dir (sheet.png and unknowns under their own suffix)."""
+    maps = {}
+    for p in sorted(Path(directory).glob("*.png")):
+        if p.name == "sheet.png":
+            continue
+        stem = p.stem.lower()
+        for suf, kind in MAP_SUFFIXES:
+            if stem == suf or stem.endswith("_" + suf):
+                maps.setdefault(kind, p)
+                break
+        else:
+            maps.setdefault(stem.rsplit("_", 1)[-1], p)
+    return maps
+
+
+def _channel(img, band):
+    return img.convert("RGBA").getchannel(band)
+
+
+def split_maps(maps):
+    """Open images and split packed maps into single-meaning grayscale/RGB images: {label: Image}."""
+    from PIL import Image, ImageOps
+    out = {}
+    for kind, p in maps.items():
+        img = Image.open(p)
+        img.load()
+        if kind == "metal_smoothness":  # Unity: R = metallic, A = smoothness
+            out["metallic"] = _channel(img, "R")
+            out["roughness"] = ImageOps.invert(_channel(img, "A"))
+        elif kind == "orm":  # glTF/Godot ORM: R = AO, G = roughness, B = metallic
+            out["ao"], out["roughness"], out["metallic"] = (_channel(img, b) for b in "RGB")
+        elif kind == "smoothness":
+            out.setdefault("roughness", ImageOps.invert(img.convert("L")))
+        elif kind in ("albedo", "normal", "emission"):
+            out[kind] = img.convert("RGB")
+        elif kind in ("height", "ao", "roughness", "metallic", "opacity"):
+            out[kind] = img.convert("L")
+        else:
+            out[kind] = img.convert("RGB")
+    return out
+
+
+def lit_preview(albedo, normal, ao=None, size=512):
+    """Crude Lambert render (one light from top-left) so relief reads at a glance. Pure Pillow."""
+    from PIL import Image
+    a = albedo.convert("RGB").resize((size, size)).tobytes()
+    n = normal.convert("RGB").resize((size, size)).tobytes()
+    o = ao.convert("L").resize((size, size)).tobytes() if ao is not None else None
+    lx, ly, lz = -0.5, 0.6, 0.62
+    ln = (lx * lx + ly * ly + lz * lz) ** 0.5
+    lx, ly, lz = lx / ln, ly / ln, lz / ln
+    px = bytearray(len(a))
+    for i in range(size * size):
+        j = 3 * i
+        nx, ny, nz = n[j] / 127.5 - 1, -(n[j + 1] / 127.5 - 1), n[j + 2] / 127.5 - 1  # Unity normals: +Y up; image y is down
+        nl = (nx * nx + ny * ny + nz * nz) ** 0.5 or 1.0
+        lam = max(0.0, (nx * lx + ny * ly + nz * lz) / nl)
+        k = (0.25 + 0.85 * lam) * ((0.5 + 0.5 * o[i] / 255) if o is not None else 1.0)
+        px[j], px[j + 1], px[j + 2] = (min(255, int(a[j + c] * k)) for c in range(3))
+    return Image.frombytes("RGB", (size, size), bytes(px))
+
+
+def _font(size):
+    from PIL import ImageFont
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1
+        return ImageFont.load_default()
+
+
+def make_sheet(directory, out=None, tile=384, cols=4, title=None):
+    """Write a labeled contact sheet of every map in `directory`. Returns {"sheet", "tiles"}."""
+    from PIL import Image, ImageDraw
+    directory = Path(directory)
+    maps = classify_maps(directory)
+    if not maps:
+        raise SystemExit("mmx sheet: no PNG maps in %s" % directory)
+    imgs = split_maps(maps)
+    tiles = {}
+    if "albedo" in imgs and "normal" in imgs:
+        lit = lit_preview(imgs["albedo"], imgs["normal"], imgs.get("ao"))
+        tiles["lit"] = lit
+        t2 = Image.new("RGB", (lit.width * 2, lit.height * 2))
+        for x in (0, lit.width):
+            for y in (0, lit.height):
+                t2.paste(lit, (x, y))
+        tiles["lit tiled 2x2"] = t2
+    tiles.update(imgs)
+    order = [k for k in SHEET_ORDER if k in tiles] + sorted(k for k in tiles if k not in SHEET_ORDER)
+
+    head, lab = 30, 22
+    rows = (len(order) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * tile, head + rows * (tile + lab)), (28, 28, 28))
+    dr = ImageDraw.Draw(sheet)
+    dr.text((6, 6), title or str(directory), fill=(255, 255, 255), font=_font(16))
+    info = []
+    for i, k in enumerate(order):
+        im = tiles[k]
+        x, y = (i % cols) * tile, head + (i // cols) * (tile + lab)
+        sheet.paste(im.convert("RGB").resize((tile, tile)), (x, y + lab))
+        text = k
+        if im.mode == "L":  # numeric range helps spot flat/clipped maps
+            lo, hi = im.getextrema()
+            mean = sum(i * c for i, c in enumerate(im.histogram())) / (im.width * im.height)
+            text += "  min %.2f  mean %.2f  max %.2f" % (lo / 255, mean / 255, hi / 255)
+        dr.text((x + 6, y + 4), text, fill=(255, 255, 255), font=_font(14))
+        info.append(text)
+    out = Path(out) if out else directory / "sheet.png"
+    sheet.save(out)
+    return {"sheet": str(out), "tiles": info, "sources": {k: p.name for k, p in maps.items()}}
+
+
+def cmd_sheet(args):
+    res = make_sheet(args.dir, args.out)
+    print(json.dumps(res, indent=1))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# run / wait
+# ---------------------------------------------------------------------------
+
+
+def next_iter_dir(run_name, runs_dir=None):
+    """Create and return agent_runs/<run>/iter_NNN (next free number, from 001)."""
+    base = Path(runs_dir or RUNS_DIR) / run_name
+    base.mkdir(parents=True, exist_ok=True)
+    nums = [int(m.group(1)) for p in base.iterdir() if (m := re.fullmatch(r"iter_(\d+)", p.name))]
+    n = max(nums, default=0) + 1
+    while True:
+        d = base / ("iter_%03d" % n)
+        try:
+            d.mkdir()  # atomic claim
+            return d
+        except FileExistsError:
+            n += 1
+
+
+def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=None, note=None):
+    import shutil
+    import time
+    if not re.fullmatch(r"[\w.-]+", run_name):
+        raise SystemExit("mmx run: --run-name may only use letters, digits, '_', '-', '.'")
+    ptex = Path(ptex).resolve()
+    d = next_iter_dir(run_name, runs_dir)
+    _write_json(d / STATUS_NAME, {"state": "running", "started": time.time(), "ptex": str(ptex)})
+    copy = d / ptex.name
+    shutil.copy2(ptex, copy)
+    if note:
+        (d / "note.md").write_text(note + "\n")
+    res = run_export(copy, d / "out", target, cfg, timeout)
+    res["iter_dir"] = str(d)
+    if res["ok"]:
+        try:
+            res["sheet"] = make_sheet(d / "out", d / "sheet.png", title="%s / %s  (%s)" % (run_name, d.name, ptex.name))["sheet"]
+        except Exception as e:  # keep the export result even if the sheet fails
+            res["ok"] = False
+            res["error"] = "sheet failed: %s" % e
+    _write_json(d / RESULT_NAME, res)
+    _write_json(d / STATUS_NAME, {"state": "done", "finished": time.time(), "ok": res["ok"]})
+    return res
+
+
+def cmd_run(args):
+    res = run_iteration(args.ptex, args.run_name, args.target, load_config(args.config), args.timeout,
+                        note=args.note)
+    print(json.dumps(res, indent=1, ensure_ascii=False))
+    return 0 if res["ok"] else 2
+
+
+def wait_for_result(path=None, run_name=None, timeout=300.0, fresh=60.0, runs_dir=None, poll=0.5):
+    """Block until a result appears; for use from a shell that can't launch the app itself.
+    path: an export out dir or iter dir. run_name: the newest iteration that is running, newer than
+    the call, or finished within `fresh` seconds before the call."""
+    import time
+    start = time.time()
+    while True:
+        if path is not None:
+            cand = [Path(path)]
+        else:
+            base = Path(runs_dir or RUNS_DIR) / run_name
+            cand = sorted(base.glob("iter_[0-9]*"), key=lambda p: p.name, reverse=True)[:1] if base.is_dir() else []
+        for d in cand:
+            r = d / RESULT_NAME
+            if r.exists() and (path is not None or r.stat().st_mtime >= start - fresh):
+                st = d / STATUS_NAME
+                if st.exists() and json.loads(st.read_text()).get("state") == "running":
+                    continue  # export's result is in; run is still making the sheet
+                return json.loads(r.read_text())
+        if time.time() - start > timeout:
+            return {"ok": False, "error": "mmx wait: no result after %ss" % timeout,
+                    "hint": "did the command start in the Terminal panel? check its output"}
+        time.sleep(poll)
+
+
+def cmd_wait(args):
+    if bool(args.dir) == bool(args.run_name):
+        raise SystemExit("mmx wait: give a directory or --run-name (not both)")
+    res = wait_for_result(args.dir, args.run_name, args.timeout, args.fresh)
+    print(json.dumps(res, indent=1, ensure_ascii=False))
+    return 0 if res.get("ok") else 2
+
+
+def _ensure_pillow(cmd):
+    """sheet/run need Pillow: re-exec under agent_tools/.venv if the current python lacks it."""
+    import os
+    if cmd not in ("sheet", "run"):
+        return
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        if VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_PYTHON.parent.parent.resolve():
+            os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
+        raise SystemExit("mmx %s needs Pillow: python3 -m venv agent_tools/.venv && "
+                         "agent_tools/.venv/bin/pip install pillow" % cmd)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="mmx", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1114,7 +1584,39 @@ def main(argv=None):
     p = sub.add_parser("node", help="print one node type's catalog entry")
     p.add_argument("type")
     p.set_defaults(fn=cmd_node)
+
+    def export_opts(p):
+        p.add_argument("--target", help="export target (default from mmx.toml: Unity/URP)")
+        p.add_argument("--timeout", type=float, help="seconds before the app is killed (default from mmx.toml)")
+        p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
+
+    p = sub.add_parser("export", help="validate + export a .ptex with the MM binary; JSON summary, exit 0/1/2")
+    p.add_argument("ptex")
+    p.add_argument("--out", required=True, help="output dir (created)")
+    p.add_argument("--keep-meta", action="store_true", help="keep existing .meta files (Unity GUIDs)")
+    p.add_argument("--no-validate", action="store_true", help="skip mmx validate")
+    export_opts(p)
+    p.set_defaults(fn=cmd_export)
+    p = sub.add_parser("sheet", help="labeled contact-sheet PNG of an export dir")
+    p.add_argument("dir")
+    p.add_argument("--out", help="output PNG (default <dir>/sheet.png)")
+    p.set_defaults(fn=cmd_sheet)
+    p = sub.add_parser("run", help="one iteration: agent_runs/<run>/iter_NNN/ with ptex copy, out/, sheet.png")
+    p.add_argument("ptex")
+    p.add_argument("--run-name", required=True)
+    p.add_argument("--note", help="text saved as note.md in the iteration dir (what changed and why)")
+    export_opts(p)
+    p.set_defaults(fn=cmd_run)
+    p = sub.add_parser("wait", help="wait for an export/run started elsewhere (Terminal panel); print its result")
+    p.add_argument("dir", nargs="?", help="export out dir or iteration dir")
+    p.add_argument("--run-name", help="wait for this run's newest iteration")
+    p.add_argument("--timeout", type=float, default=300.0)
+    p.add_argument("--fresh", type=float, default=60.0,
+                   help="with --run-name: accept a result finished up to this many seconds before the call")
+    p.set_defaults(fn=cmd_wait)
     args = ap.parse_args(argv)
+    if argv is None:
+        _ensure_pillow(args.cmd)
     return args.fn(args)
 
 

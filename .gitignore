@@ -29,3 +29,6 @@ build/
 
 # Agent iteration outputs
 agent_runs/
+
+# mmx venv (Pillow)
+agent_tools/.venv/
