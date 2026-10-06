@@ -137,21 +137,39 @@ class TestChecks(Base):
 
 
 # A stand-in for the Material Maker binary: FAKE_MM_MODE = ok (write the requested files),
-# partial (skip the .mat), hang (sleep). Gets the same argv as the real app.
+# partial (skip the .mat), hang (sleep), badargs/loadfail/exportfail (exit 1/2/3), nojson (no summary).
+# Gets the same argv as the real app; with --json (source mode) it prints parse_args.gd's summary line.
 FAKE_MM = """#!/usr/bin/env python3
-import os, sys, time
+import json, os, sys, time
 mode = os.environ.get("FAKE_MM_MODE", "ok")
+args = sys.argv[1:]
+want_json = "--json" in args
 print("Exporting...", flush=True)
 if mode == "hang":
     time.sleep(60)
-out = sys.argv[sys.argv.index("-o") + 1]
-stem = os.path.splitext(os.path.basename(sys.argv[-1]))[0]
+out = args[args.index("-o") + 1]
+codes = {"badargs": 1, "loadfail": 2, "exportfail": 3}
+if mode in codes:
+    print("ERROR: boom", file=sys.stderr)
+    if want_json:
+        print(json.dumps({"errors": ["boom"], "exit_code": codes[mode], "files": [], "materials": [],
+                          "mm_cli": 1, "ok": False, "warnings": []}))
+    sys.exit(codes[mode])
+json.dump(args, open(os.path.join(out, "argv.json"), "w"))
+stem = os.path.splitext(os.path.basename(args[-1]))[0]
+files = []
 for suf in ("_albedo.png", "_albedo.png.meta", "_metal_smoothness.png", "_metal_smoothness.png.meta",
             "_normal.png", "_normal.png.meta", "_height.png", "_height.png.meta",
             "_occlusion.png", "_occlusion.png.meta", ".mat"):
     if not (mode == "partial" and suf == ".mat"):
-        open(os.path.join(out, stem + suf), "w").write("x")
+        files.append(os.path.join(out, stem + suf))
+        open(files[-1], "w").write("x")
 print("Done")
+if want_json and mode != "nojson":
+    size = int(args[args.index("--size") + 1]) if "--size" in args else 2048
+    target = args[args.index("--target") + 1]
+    print(json.dumps({"errors": [], "exit_code": 0, "files": files, "mm_cli": 1, "ok": True, "warnings": [],
+                      "materials": [{"files": files, "input": args[-1], "ok": True, "size": size, "target": target}]}))
 """
 
 
@@ -186,6 +204,7 @@ class TestExportRun(unittest.TestCase):
         fake.write_text(FAKE_MM)
         fake.chmod(0o755)
         cfg = mmx.load_config()
+        cfg["mode"] = "release"  # independent of mmx.toml
         cfg["release"]["binary"] = str(fake)
         cfg["timeout"] = 3
         self.cfg, self.t = cfg, t
@@ -242,6 +261,56 @@ class TestExportRun(unittest.TestCase):
         for bad in ("../x", "a/../b", "/abs", "a//b", "a/"):
             with self.assertRaises(SystemExit):
                 mmx.run_iteration(self.t / "none.ptex", bad, runs_dir=self.t)
+
+
+class TestExportSource(TestExportRun):
+    """Source mode: Godot + repo, parse_args.gd's --json summary and exit codes."""
+    def setUp(self):
+        super().setUp()
+        self.cfg["mode"] = "source"
+        self.cfg["source"]["godot"] = self.cfg["release"]["binary"]
+        self.cfg["release"]["binary"] = "/nonexistent"
+
+    def test_command(self):
+        cmd = mmx.export_command(self.cfg, "/a/b.ptex", "/o", "Unity/URP", 512)
+        self.assertEqual(cmd[1:3], ["--path", self.cfg["source"]["project"]])
+        for flag in ("--export-material", "--json", "--strict-target"):
+            self.assertIn(flag, cmd)
+        self.assertEqual(cmd[cmd.index("--size") + 1], "512")
+        self.assertEqual(cmd[-3:], ["-o", "/o", "/a/b.ptex"])
+        self.assertNotIn("--size", mmx.export_command(self.cfg, "/a/b.ptex", "/o", "Unity/URP"))
+        self.cfg["mode"] = "release"
+        with self.assertRaises(SystemExit):
+            mmx.export_command(self.cfg, "/a/b.ptex", "/o", "Unity/URP", 512)
+
+    def test_summary_and_size(self):
+        import os
+        os.environ["FAKE_MM_MODE"] = "ok"
+        try:
+            r = mmx.run_export(BRICKS, self.t / "out", cfg=self.cfg, size=256)
+        finally:
+            del os.environ["FAKE_MM_MODE"]
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["mm"]["targets"], ["Unity/URP"])
+        self.assertEqual(r["mm"]["sizes"], [256])
+        self.assertEqual(r["mm"]["files_written"], 11)
+
+    def test_exit_codes(self):
+        for mode, msg in (("badargs", "bad arguments"), ("loadfail", "load/parse failure"),
+                          ("exportfail", "export failure")):
+            r = self.export(mode)
+            self.assertFalse(r["ok"])
+            self.assertEqual(r["error"], msg + ": boom")
+            self.assertIn("ERROR: boom", r["log_errors"])
+
+    def test_missing_summary(self):
+        r = self.export("nojson")
+        self.assertFalse(r["ok"])
+        self.assertIn("no JSON summary", r["error"])
+
+    def test_parse_mm_summary(self):
+        self.assertIsNone(mmx.parse_mm_summary("noise\n{not json\n"))
+        self.assertEqual(mmx.parse_mm_summary('x\n{"mm_cli": 1, "ok": true}\nWARNING: leak')["ok"], True)
 
 
 try:

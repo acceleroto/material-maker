@@ -106,11 +106,13 @@ static func dir_snapshot(path : String) -> Dictionary:
 		rv[f] = FileAccess.get_modified_time(path.path_join(f))
 	return rv
 
-static func written_files(path : String, before : Dictionary) -> Array[String]:
+# Files named name_prefix* that are new or changed since the snapshot (other files may
+# be written concurrently, e.g. a log the caller redirects into the output directory)
+static func written_files(path : String, before : Dictionary, name_prefix : String) -> Array[String]:
 	var rv : Array[String] = []
 	var after : Dictionary = dir_snapshot(path)
 	for f : String in after.keys():
-		if not before.has(f) or before[f] != after[f]:
+		if f.begins_with(name_prefix) and (not before.has(f) or before[f] != after[f]):
 			rv.append(path.path_join(f))
 	rv.sort()
 	return rv
@@ -199,14 +201,16 @@ func export_files(files, output_dir, target, target_file, image_size, strict_tar
 				target_file_name = target_file_name.replace("%n", mat_name_lower)
 				target_file_name = target_file_name.replace("%a", mat_author_lower)
 				var prefix : String = output_dir.path_join(target_file_name)
+				var name_prefix : String = prefix.get_file()
 				if c.has_method("get_export_profiles"):
 					print("Exporting Material %s to %s..." % [f.get_file(), prefix])
 				else:
 					var file_name : String = c.interpret_file_name(c.parameters.suffix, prefix.get_base_dir())
 					print("Saving additional export %s" % file_name)
+					name_prefix = file_name.get_file()
 				var before : Dictionary = dir_snapshot(prefix.get_base_dir())
 				await c.export_material(prefix, best_target, image_size, true)
-				var written : Array[String] = written_files(prefix.get_base_dir(), before)
+				var written : Array[String] = written_files(prefix.get_base_dir(), before, name_prefix)
 				if written.is_empty():
 					show_error("Export of %s wrote no files to %s" % [f.get_file(), prefix.get_base_dir()], EXIT_EXPORT)
 					failed = true

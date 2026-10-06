@@ -1149,18 +1149,24 @@ def load_config(path=None):
     return cfg
 
 
-def export_command(cfg, ptex, out_dir, target):
-    """argv for one CLI export. Paths must be absolute (the app changes its cwd on macOS)."""
+def export_command(cfg, ptex, out_dir, target, size=None):
+    """argv for one CLI export. Paths must be absolute (the app changes its cwd on macOS).
+    size: texture size in pixels (source mode only; None/0 = the graph's own size)."""
     mode = cfg["mode"]
+    # --target, never -t (Godot swallows -t); --export-material, never --export (Godot project export).
     if mode == "release":
-        exe = cfg["release"]["binary"]
-        prefix = [exe]
+        if size:
+            raise SystemExit("mmx: --size needs mode = \"source\" (the release app ignores --size)")
+        return [cfg["release"]["binary"], "--export-material", "--target", target, "-o", str(out_dir), str(ptex)]
     elif mode == "source":
-        raise SystemExit("mmx: mode = \"source\" (Godot + repo) is planned for Phase 2; use mode = \"release\"")
+        # Our parse_args.gd: --json summary line, exit codes 0/1/2/3, no silent target fallback.
+        cmd = [cfg["source"]["godot"], "--path", cfg["source"]["project"], "--export-material", "--json",
+               "--strict-target", "--target", target]
+        if size:
+            cmd += ["--size", str(int(size))]
+        return cmd + ["-o", str(out_dir), str(ptex)]
     else:
         raise SystemExit("mmx: unknown mode %r in config" % mode)
-    # --target, never -t (Godot swallows -t); --export-material, never --export (Godot project export).
-    return prefix + ["--export-material", "--target", target, "-o", str(out_dir), str(ptex)]
 
 
 def mmg_dirs(cfg):
@@ -1250,10 +1256,27 @@ def _write_json(path, data):
 
 
 # Printed on every successful run (see agent_docs/phase0_notes.md).
-HARMLESS_LOG = ("resources still in use at exit", "ObjectDB instances were leaked", "user://export_targets")
+HARMLESS_LOG = ("resources still in use at exit", "ObjectDB instances were leaked", "user://export_targets",
+                "Steam", "SteamAPI")
+
+# parse_args.gd exit codes (source mode)
+MM_EXIT_CODES = {1: "bad arguments", 2: "load/parse failure", 3: "export failure"}
 
 
-def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=False, skip_validate=False):
+def parse_mm_summary(text):
+    """The last `--json` summary line ({"mm_cli": 1, ...}) printed by parse_args.gd, or None."""
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and '"mm_cli"' in line:
+            try:
+                return json.loads(line)
+            except ValueError:
+                return None
+    return None
+
+
+def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=False, skip_validate=False,
+               size=None):
     """Validate, export with the MM binary, check outputs. Returns a JSON-able summary
     (also written to <out_dir>/mmx_result.json)."""
     import os
@@ -1265,7 +1288,10 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
     timeout = float(timeout or cfg["timeout"])
     ptex = Path(ptex).resolve()
     out_dir = Path(out_dir).resolve()
-    res = {"ok": False, "stage": "validate", "ptex": str(ptex), "out_dir": str(out_dir), "target": target}
+    res = {"ok": False, "stage": "validate", "ptex": str(ptex), "out_dir": str(out_dir), "target": target,
+           "mode": cfg["mode"]}
+    if size:
+        res["size"] = size
 
     def done(**kw):
         res.update(kw)
@@ -1295,13 +1321,15 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
             Path(f).unlink(missing_ok=True)
 
     res["stage"] = "export"
-    cmd = export_command(cfg, ptex, out_dir, target)
+    cmd = export_command(cfg, ptex, out_dir, target, size)
     log_path = out_dir / "export.log"
+    err_path = out_dir / "export.stderr.log"
     res["log"] = str(log_path)
+    res["stderr_log"] = str(err_path)
     res["command"] = cmd
     start = time.time()
-    with open(log_path, "w") as log:
-        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+    with open(log_path, "w") as log, open(err_path, "w") as err:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=err, stdin=subprocess.DEVNULL,
                                 start_new_session=True)
         try:
             rc = proc.wait(timeout=timeout)
@@ -1314,7 +1342,16 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
     res["exit_code"] = rc
 
     log_text = log_path.read_text(errors="replace")
-    res["log_errors"] = [l.strip() for l in log_text.splitlines()
+    err_text = err_path.read_text(errors="replace")
+    mm = parse_mm_summary(log_text) if cfg["mode"] == "source" else None
+    if mm is not None:
+        res["mm"] = {k: mm.get(k) for k in ("exit_code", "warnings", "errors")}
+        res["mm"]["targets"] = sorted({m.get("target") for m in mm.get("materials", []) if m.get("target")})
+        res["mm"]["sizes"] = sorted({m.get("size") for m in mm.get("materials", []) if m.get("size")})
+        res["mm"]["files_written"] = len(mm.get("files", []))
+        if mm.get("warnings"):
+            res["warnings"] = mm["warnings"]
+    res["log_errors"] = [l.strip() for l in (log_text + "\n" + err_text).splitlines()
                          if re.search(r"\bERROR\b|Error in expression|SCRIPT ERROR|Failed", l)
                          and not any(h in l for h in HARMLESS_LOG)][:20]
     written, missing = [], []
@@ -1330,12 +1367,19 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
     if timed_out:
         hints.append("timed out after %ss. If launched from Claude's Bash tool the app hangs in "
                      "CAMetalLayer nextDrawable: run mmx via the Terminal panel (run_in_terminal)." % timeout)
-    elif not log_text.strip() and res["seconds"] < 3:
+    elif not (log_text + err_text).strip() and res["seconds"] < 3:
         hints.append("app quit instantly with no output: add steam_appid.txt (4110830) next to the binary")
     if hints:
         res["hints"] = hints
     if timed_out:
         return done(error="timeout")
+    if cfg["mode"] == "source":
+        if rc != 0:
+            what = MM_EXIT_CODES.get(rc, "app exited with code %s" % rc)
+            detail = "; ".join((mm or {}).get("errors") or []) or "see %s" % err_path
+            return done(error="%s: %s" % (what, detail))
+        if mm is None:
+            return done(error="no JSON summary from Material Maker (is parse_args.gd up to date?); see %s" % log_path)
     if missing:
         return done(error="expected output files missing (see log_errors / %s)" % log_path)
     return done(ok=True, stage="done")
@@ -1343,7 +1387,7 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
 
 def cmd_export(args):
     res = run_export(args.ptex, args.out, args.target, load_config(args.config), args.timeout,
-                     args.keep_meta, args.no_validate)
+                     args.keep_meta, args.no_validate, args.size)
     print(json.dumps(res, indent=1, ensure_ascii=False))
     return 0 if res["ok"] else (1 if res["stage"] in ("validate", "plan") else 2)
 
@@ -1506,7 +1550,7 @@ def next_iter_dir(run_name, runs_dir=None):
 RUN_NAME_RE = re.compile(r"[\w.-]+(/[\w.-]+)*")
 
 
-def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=None, note=None):
+def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=None, note=None, size=None):
     import shutil
     import time
     if not RUN_NAME_RE.fullmatch(run_name) or any(c in (".", "..") for c in run_name.split("/")):
@@ -1519,7 +1563,7 @@ def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=
     shutil.copy2(ptex, copy)
     if note:
         (d / "note.md").write_text(note + "\n")
-    res = run_export(copy, d / "out", target, cfg, timeout)
+    res = run_export(copy, d / "out", target, cfg, timeout, size=size)
     res["iter_dir"] = str(d)
     if res["ok"]:
         try:
@@ -1534,7 +1578,7 @@ def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=
 
 def cmd_run(args):
     res = run_iteration(args.ptex, args.run_name, args.target, load_config(args.config), args.timeout,
-                        note=args.note)
+                        note=args.note, size=args.size)
     print(json.dumps(res, indent=1, ensure_ascii=False))
     return 0 if res["ok"] else 2
 
@@ -1602,6 +1646,8 @@ def main(argv=None):
     def export_opts(p):
         p.add_argument("--target", help="export target (default from mmx.toml: Unity/URP)")
         p.add_argument("--timeout", type=float, help="seconds before the app is killed (default from mmx.toml)")
+        p.add_argument("--size", type=int, help="texture size in pixels, e.g. 512 for fast drafts "
+                       "(source mode only; default: the graph's own size)")
         p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
 
     p = sub.add_parser("export", help="validate + export a .ptex with the MM binary; JSON summary, exit 0/1/2")
