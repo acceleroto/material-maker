@@ -29,6 +29,8 @@ Reference, read on demand (don't inline them into your context all at once):
    `wood`, `rusted_metal`, `stone_wall`, `tiles`, `marble`, `metal_pattern*`, ...) and
    `agent_docs/examples_annotated.md`. Copy it to `agent_runs/<run>/<name>.ptex`; the output files
    are named after the ptex basename. Run it once unchanged as the baseline (iteration 1).
+   When several examples could fit, look before choosing: `mmx preview <example> --size 256` (~2 s each)
+   shows what each one is (in 4.3 this found `metal_pattern_3`, already a riveted panel).
 3. **Edit one or two things** per iteration with a small Python script (keep it as
    `agent_runs/<run>/edit_NN.py` so the change is reproducible). Helpers worth copying:
    `agent_tools/proto_0.3/g.py` (`Graph(path).set(node, **params)`, `.add(name, type, **params)`,
@@ -118,6 +120,8 @@ Map tiles below it, left to right, top to bottom (only maps that were exported a
 - **Unconnected inputs fail silently.** An unwired input reads as 0 (black), so a `tiler` with no
   input renders nothing and an unwired `colorize` shows its gradient across U. `mmx validate`
   doesn't flag this. After adding nodes, list every new node's inputs and check each is wired.
+- **`scratches2.randomness` spreads the angle.** At 0.5 the scratches point in every direction
+  (a web of arcs) even with `angle` 0; use ~0.05 for scratches along a grain.
 - **Scales are not always per cell.** `tiler.scale_x/y` are fractions of the whole texture: an
   instance in a `tx`×`ty` grid fills one cell at scale 1/tx. Voronoi `Borders` distance grows with
   cell size, so changing `voronoi.scale` changes crack width for the same colorize threshold.

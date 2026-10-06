@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 4.2 (complete); next 4.3
+**Current session:** 4.3 (complete); next 5.1
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -158,6 +158,17 @@
   (`compare.png` = bricks / blue-mortar bricks / dry_earth), `agent_runs/4.2/{wall,bricks}/iter_001/sheet.png`.
   Docs: SKILL.md + AGENTS.md (3D preview = primary image to judge; Lambert tile secondary), README, CLAUDE.md.
 
+- 4.3 (agent, 2026-10-06): nothing open from 4.1/4.2 (optional preview `--texture-size` skipped: all graphs ≤2048,
+  previews ~2 s). GUT 41 + mmx 57 tests pass. Re-ran the three 1.3 requests with the skill, judging from the 3D preview
+  (`agent_runs/4.3/{desert,steel,oak}/`, cap 8): desert **5 iterations, success**; steel **4, success** (started from
+  `metal_pattern_3`, picked by `mmx preview` of the three metal examples; preview showed the rivets were pits → fixed in
+  one edit; no debug exports); oak **7, success** (stylized grain, bevel relief, wear, scratches, knots; two node-previews
+  diagnosed wear band/scratch angle). 16 iterations vs 18 in Phase 1, no partials, ~25 s wall per iteration.
+  `agent_runs/4.3/compare/phase1_vs_phase4.png`: Phase 1 finals re-rendered with the 3D preview. **Finding:** Phase 1's
+  "successful" steel is a noisy rippled chrome in 3D (only flat maps were judged then). Report:
+  `agent_docs/phase4_report.md`. Skill + AGENTS.md: preview candidate examples before choosing; `scratches2.randomness`
+  spreads the angle. Open ideas: zoom/crop helper for fine detail, `parameter_out_of_range` too strict (voronoi stretch).
+
 ## In progress
 - None.
 
@@ -165,10 +176,10 @@
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 4.3 per ROADMAP.md "### 4.3": finish anything left from 4.1/4.2 (nothing known open; optional: a
-  `--texture-size` for faster previews of 4096 graphs, since preview textures render at the graph's own size),
-  then re-run the three Phase 1.3 requests (desert, steel, oak; see `agent_docs/phase1_report.md` and
-  `agent_runs/1.3/`) following SKILL.md, judging from the 3D preview row of `sheet.png`. Write
-  `agent_docs/phase4_report.md` comparing quality and iteration count with `phase1_report.md`. Commit, push,
-  update PROGRESS.md (next: 5.1). Tests: GUT `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
-  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.
+- Checkpoint 4 (user): compare `agent_docs/phase1_report.md` with `agent_docs/phase4_report.md` and
+  `agent_runs/4.3/compare/phase1_vs_phase4.png`; decide on Phase 5.
+- Then Session 5.1 per ROADMAP.md "### 5.1" (use plan mode first): `--serve` JSON-RPC mode on stdin/stdout (load, save,
+  list_nodes, describe_node, add_node, remove_node, connect, disconnect, set_param, get_graph, validate, render_output,
+  render_preview, export, shutdown) built on MMGenGraph methods; reuse `cli_inspect.gd` / `cli_preview.gd`. Phase 4's
+  report suggests parameter sweeps (several values rendered side by side) as the main payoff. Tests: GUT
+  `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`, `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.
