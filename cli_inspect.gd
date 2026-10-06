@@ -153,7 +153,7 @@ static func check_connections(connections : Array, port_defs : Dictionary, missi
 		if not c is Dictionary or not (c.has("from") and c.has("from_port") and c.has("to") and c.has("to_port")):
 			rv.append(issue("bad_connection", graph_path, "", "connections[%d] must have from, from_port, to, to_port" % i))
 			continue
-		var label : String = "%s:%s -> %s:%s" % [ c.from, c.from_port, c.to, c.to_port ]
+		var label : String = "%s:%s -> %s:%s" % [ c.from, port_str(c.from_port), c.to, port_str(c.to_port) ]
 		var ok : bool = true
 		var types : Dictionary = {}
 		for end : Array in [ [ str(c.from), c.from_port, "outputs", "output" ], [ str(c.to), c.to_port, "inputs", "input" ] ]:
@@ -168,7 +168,7 @@ static func check_connections(connections : Array, port_defs : Dictionary, missi
 			var ports : Array = port_defs[node_name][end[2]]
 			var port = end[1]
 			if not (port is int or port is float) or int(port) != port or port < 0 or port >= ports.size():
-				rv.append(issue("bad_%s_port" % end[3], graph_path, node_name, "connection %s: %s has no %s port %s (it has %d)" % [ label, node_name, end[3], str(port), ports.size() ]))
+				rv.append(issue("bad_%s_port" % end[3], graph_path, node_name, "connection %s: %s has no %s port %s (it has %d)" % [ label, node_name, end[3], port_str(port), ports.size() ]))
 				ok = false
 				continue
 			types[end[3]] = ports[int(port)]
@@ -182,6 +182,11 @@ static func check_connections(connections : Array, port_defs : Dictionary, missi
 		if not is_compatible_port_type(types.output, types.input, io_types):
 			rv.append(issue("port_type_mismatch", graph_path, str(c.to), "connection %s connects a %s output to a %s input" % [ label, types.output, types.input ]))
 	return rv
+
+static func port_str(port : Variant) -> String:
+	if port is float and port == floorf(port):
+		return str(int(port))
+	return str(port)
 
 static func issue(code : String, graph_path : String, node_name : String, message : String) -> Dictionary:
 	return { code=code, graph_path=graph_path, node=node_name, message=message }
@@ -413,7 +418,11 @@ func validate_file(path : String) -> Dictionary:
 	add_child(gen)
 	if gen is MMGenGraph:
 		check_graph(gen, data, "/", rv)
-	await check_shaders(gen, rv)
+	if rv.errors.is_empty():
+		await check_shaders(gen, rv)
+	else:
+		# Broken nodes or connections make downstream shaders fail too: fix those first
+		rv.warnings.append(issue("shader_check_skipped", "/", "", "shaders were not compiled because the graph has errors"))
 	rv.ok = rv.errors.is_empty()
 	remove_child(gen)
 	gen.free()
@@ -463,7 +472,7 @@ func check_graph(graph : MMGenGraph, data : Dictionary, graph_path : String, rv 
 				if gc.to == str(c.to) and gc.to_port == int(c.to_port):
 					replaced = true
 			if not replaced:
-				rv.errors.append(issue("connection_rejected", graph_path, str(c.to), "connection %s:%s -> %s:%s was rejected by the engine (loop?)" % [ c.from, c.from_port, c.to, c.to_port ]))
+				rv.errors.append(issue("connection_rejected", graph_path, str(c.to), "connection %s:%s -> %s:%s was rejected by the engine (loop?)" % [ c.from, port_str(c.from_port), c.to, port_str(c.to_port) ]))
 
 # Collects the generators whose outputs are compiled: every node of the graph and of its sub-graphs
 static func shader_generators(gen : MMGenBase, graph_path : String, rv : Array[Dictionary]) -> void:
@@ -529,18 +538,25 @@ func check_shaders(gen : MMGenBase, rv : Dictionary) -> void:
 				continue
 			if result.messages.is_empty():
 				result.messages.append({ line=0, message="shader compilation failed", node="", section="", code="" })
+			# One error per faulty node, with all its messages; the node is the one named by the
+			# generated code where the error is, which may be upstream of the compiled output
+			var output : String = "%s:%d" % [ g.path, i ]
 			for m : Dictionary in result.messages:
-				var node_name : String = m.node if m.node != "" else g.path
-				var key : String = node_name+"|"+m.message
+				var node_name : String = m.node if m.node != "" else g.gen.name
+				var key : String = node_name+"|"+m.section
 				if reported.has(key):
-					reported[key].outputs.append("%s:%d" % [ g.path, i ])
+					var e : Dictionary = reported[key]
+					if not e.outputs.has(output):
+						e.outputs.append(output)
+					if not e.messages.has(m.message):
+						e.messages.append(m.message)
 					continue
-				var e : Dictionary = issue("shader_compile_error", g.path.get_base_dir(), g.gen.name,
-						"output %d of %s does not compile: %s" % [ i, g.path, m.message ])
-				e.error_node = m.node
+				var e : Dictionary = issue("shader_compile_error", g.path.get_base_dir(), node_name,
+						"%s: %s (in the %s code, compiling output %s)" % [ node_name, m.message, m.section if m.section != "" else "generated", output ])
 				e.section = m.section
 				e.line = m.line
 				e.code_line = m.code
-				e.outputs = [ "%s:%d" % [ g.path, i ] ]
+				e.messages = [ m.message ]
+				e.outputs = [ output ]
 				reported[key] = e
 				rv.errors.append(e)

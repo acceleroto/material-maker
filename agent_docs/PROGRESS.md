@@ -100,7 +100,10 @@
   mmx catalog → mmx validate). Done so far: `cli_inspect.gd` (repo root; `parse_args.gd` delegates to it when
   `--list-nodes`/`--describe-node`/`--validate` is given). `--list-nodes --json` (items from the add-node menu's
   library manager + all 411 types), `--describe-node <type>...|--all --json` (instantiated generators; whole set in
-  ~2 s). GUT `test/test_cli_inspect.gd` (run with `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`;
+  ~2 s), `--validate <ptex>... --json` (unknown types, connection checks, then SPIR-V compile of every output of
+  every node incl. sub-graph nodes via `MMComputeShader`, no rendering; skipped if the graph already has errors;
+  exit 4 = invalid). All 43 examples in one launch: ~50 s, 1663 outputs; 42 clean, `doc_tools.ptex` has 2 real
+  GLSL errors (`'input'` reserved word, undeclared `_seed_variation_`). GUT `test/test_cli_inspect.gd` (run with `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`;
   `-gdir=res://test` also runs upstream doc tests that already fail).
 
 ## Blockers
