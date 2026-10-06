@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 5.1 (in progress)
+**Current session:** 5.1 (complete); next 5.2
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -169,21 +169,38 @@
   `agent_docs/phase4_report.md`. Skill + AGENTS.md: preview candidate examples before choosing; `scratches2.randomness`
   spreads the angle. Open ideas: zoom/crop helper for fine detail, `parameter_out_of_range` too strict (voronoi stretch).
 
+- 5.1 (agent, 2026-10-06): engine server `--serve` (`cli_serve.gd`; `parse_args.gd` gained one dispatch branch):
+  JSON-RPC lines on stdin/stdout (`{"id","method","params"}` → `{"mm_rpc":1,"id","ok","result"|"error":{code,message},
+  "warnings"?}`; ready line at startup; non-`mm_rpc` stdout lines are engine noise; stdin EOF → exit 0). Methods load,
+  save, list_nodes (query/category filter), describe_node (type or node with current values + connections), add_node,
+  remove_node, connect (port range/type checks, loop → `connection_rejected`), disconnect, set_param (values coerced per
+  definition: enum names, colours, gradients...; float strings only as `$` expressions), get_graph (compact or full .ptex),
+  validate, render_output, render_preview, export (strict target, deletes stale `<prefix>.*`/`<prefix>_*`), shutdown.
+  All built on MMGenGraph methods; `cli_inspect.gd`/`cli_preview.gd` split into load + `validate_gen`/`render_node`/
+  `render_gen` (CLI output unchanged). `agent_tools/mm_client.py`: `MMClient` (wrappers, timeouts kill the server, noise
+  filtering), `batch <jsonl>`, `bench`. **Byte-identical** to the CLI after edits: render_output, render_preview and all 5
+  exported maps (tests). **Engine bugs found + worked around:** (1) freeing a graph/node while mm_deps renders its buffers
+  left `mm_deps.do_update()` awaiting forever → all later renders hung (server waits for renders before load/remove_node);
+  (2) export replaces the Material node's preview textures (process_shader on the templates) → later float edits never
+  reached render_preview (server calls `material.update()` after export). Probably upstream editor bugs too (not checked).
+  **Measured** (`agent_runs/5.1/bench_*/bench.json`): server start ~1.3 s; edit + 3D preview + node render ≈ 0.45 s warm
+  (first 0.7–1.9 s) vs 4.2 s (bricks) / 6.8 s (stylized_wall) relaunching: 8.1× / 9.1× over a 5-value sweep; with a 2048
+  export per iteration 4.3 s vs 7.5 s (1.7×, export rendering dominates). Tests: GUT 50 (new `test/test_cli_serve.gd`),
+  mmx 57, `agent_tools/test_mm_client.py` 23 (fake server + real server ~25 s). Docs: README "Server mode", CLAUDE.md,
+  SKILL.md + AGENTS.md (parameter sweeps via MMClient).
+
 ## In progress
-- 5.1: `cli_serve.gd` + `agent_tools/mm_client.py` + tests done (GUT `test/test_cli_serve.gd` 9 tests, total 50 pass;
-  `agent_tools/test_mm_client.py` 22 pass in ~18 s incl. real-server renders/export byte-identical to the CLI).
-  **Bug found+fixed:** freeing a graph (load) or removing a node while mm_deps still renders its buffers left
-  `mm_deps.do_update()` awaiting forever → every later render hung; the server now waits for mm_deps to settle first
-  (`settle_renders`). Next: bench (`mm_client.py bench`), docs (README "Server mode", CLAUDE.md, SKILL/AGENTS), PROGRESS.
+- None.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Checkpoint 4 (user): compare `agent_docs/phase1_report.md` with `agent_docs/phase4_report.md` and
-  `agent_runs/4.3/compare/phase1_vs_phase4.png`; decide on Phase 5.
-- Then Session 5.1 per ROADMAP.md "### 5.1" (use plan mode first): `--serve` JSON-RPC mode on stdin/stdout (load, save,
-  list_nodes, describe_node, add_node, remove_node, connect, disconnect, set_param, get_graph, validate, render_output,
-  render_preview, export, shutdown) built on MMGenGraph methods; reuse `cli_inspect.gd` / `cli_preview.gd`. Phase 4's
-  report suggests parameter sweeps (several values rendered side by side) as the main payoff. Tests: GUT
-  `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`, `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.
+- Session 5.2 per ROADMAP.md "### 5.2": stdio MCP server `agent_tools/mcp_server.py` wrapping the `--serve` process via
+  `agent_tools/mm_client.py` (`MMClient`; protocol, methods, error codes in `agent_tools/README.md` "Server mode"): one tool
+  per server method with JSON schemas and clear descriptions, render tools return the PNG as an image; project-scoped
+  registration for Claude Code, Codex instructions; SKILL.md/AGENTS.md prefer MCP tools when available. Read
+  "Tool-MaterialMaker-MCP" (graysonchalmers) for ideas only (check its license before copying anything). Tests:
+  GUT `-gtest=res://test/test_cli_serve.gd,res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
+  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py agent_tools/test_mm_client.py`.
+- Still open for the user: Checkpoint 4 review (`agent_docs/phase1_report.md` vs `agent_docs/phase4_report.md`).

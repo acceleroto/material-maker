@@ -68,6 +68,10 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
   `iter_NNN/preview_3d.png` and the top row of `sheet.png`. It is the primary image to judge.
 - Per-node preview (since 4.1): `python3 agent_tools/mmx.py node-preview <ptex> --node <name> [--port N]`
   (engine `--render-output <abs ptex> --node <name> [--port n] [--size px] -o <abs png> --json`, exit 0/1/2/3).
+- Engine server (since 5.1): `<Godot> --path <Repo> --serve` (`cli_serve.gd`, JSON-RPC lines on stdin/stdout:
+  load/save/list_nodes/describe_node/add_node/remove_node/connect/disconnect/set_param/get_graph/validate/
+  render_output/render_preview/export/shutdown); Python client `agent_tools/mm_client.py` (`MMClient`, `batch`, `bench`).
+  ~0.5 s per edit+preview vs ~4–7 s relaunching; outputs byte-identical to the CLI. README "Server mode".
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
   `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).
 

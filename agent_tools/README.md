@@ -237,6 +237,94 @@ assumes OpenGL (+Y) normals; additional `material_export` nodes' files aren't pr
 first material node is checked. The `parse_args.gd` additional-export branch (export nodes) wasn't
 exercised in Session 2.1 (no example uses one).
 
+## Server mode (Session 5.1): `--serve` + `mm_client.py`
+
+`<Godot> --path <repo> --serve` (`cli_serve.gd`) is a long-running engine process that keeps one graph loaded.
+Edits go through MMGenGraph methods (`add_generator`, `connect_children`, `set_parameter`, ...), never through the
+JSON, and render/validate/export run on the in-memory graph. Same code paths as the CLI modes: after edits, server
+renders and exports are **byte-identical** to the CLI on the saved graph (tested).
+
+**Speed** (bricks / stylized_wall, `mm_client.py bench`, `agent_runs/5.1/bench_*/bench.json`): server start ~1.3 s,
+load 0.1–0.5 s; set_param + 3D preview (2×512 px) + one node render ≈ **0.45 s** per iteration once warm
+(first iteration 0.7–1.9 s) vs **4.2 s / 6.8 s** relaunching the engine per step: ~8–9× on a 5-step sweep,
+~10–15× steady state. With a full 2048 export each iteration: 4.3 s vs 7.5 s (export rendering dominates).
+
+### Protocol
+One JSON object per line on stdin; one per line on stdout. Requests are processed in order, one at a time.
+```
+-> {"id": 1, "method": "set_param", "params": {"node": "Perlin", "name": "scale_x", "value": 8}}
+<- {"mm_rpc": 1, "id": 1, "ok": true, "result": {"node": "Perlin", "changed": [...], "seconds": 0.01}, "warnings": [...]}
+<- {"mm_rpc": 1, "id": 2, "ok": false, "error": {"code": "unknown_node", "message": "..."}}
+```
+- First line after startup: `{"mm_rpc": 1, "id": null, "ok": true, "result": {"ready": true, "version": 1, "pid", "rendering_device", "methods"}}`.
+- The engine also prints its own messages to stdout: **ignore every line that isn't a JSON object with `mm_rpc`**.
+  Server logs (and engine errors) go to stderr.
+- A failing request never stops the server. stdin EOF → exit 0 (64 empty reads in a row count as EOF: Godot's
+  `read_string_from_stdin` returns `""` for both). Blank lines are ignored.
+- Paths must be absolute. Node paths: `"Perlin"`, or `"graph/Bricks"` for a node inside sub-graph `graph`.
+
+### Methods
+| method | params | result |
+|---|---|---|
+| `load` | `path` | `path, nodes, material, image_size` |
+| `save` | `path?` (default: loaded file) | `path, bytes` (written like the editor's save) |
+| `list_nodes` | `query?`, `category?` | `items` (add-node menu), `types` (as `--list-nodes`) |
+| `describe_node` | `type` **or** `node` | type: as `--describe-node`; node: current parameter values (`default`), `inputs`, `outputs`, `connections`, `position` |
+| `add_node` | `type`, `name?`, `parent?`, `position?`, `parameters?` | `node, name` (deduplicated, e.g. `perlin_2`), ports, parameter values |
+| `remove_node` | `node` | `removed, connections_removed` |
+| `connect` | `from, from_port, to, to_port` (ports default 0) | `connection, replaced` (the connection it replaced on that input, or null) |
+| `disconnect` | `to, to_port`, `from?, from_port?` | `removed` |
+| `set_param` | `node` + `name, value`, or `node` + `params: {name: value}` | `changed: [{name, old, new}]` |
+| `get_graph` | `node?` (a sub-graph), `full?` | compact `nodes [{name, type, parameters}]`, `connections`; `full: true` = the `.ptex` dict |
+| `validate` | – | as `--validate` for one file: `ok, nodes, outputs_checked, errors, warnings` |
+| `render_output` | `node, output`, `port?`, `size?` (512) | as `--render-output` |
+| `render_preview` | `output`, `mesh?` (`sphere+plane` or a list), `env?` (Studio), `size?` (512) | as `--render-preview` |
+| `export` | `output_dir`, `target?` (Unity/URP, strict), `size?` (0 = graph's), `prefix?` (file stem), `overwrite?` (true) | `files, deleted, target, size` |
+| `shutdown` | – | `bye`; then exit 0 |
+
+Every result also has `seconds`. **Parameter values** are checked against the definition: float = number,
+numeric string, or an expression of `$` variables (`"$time*0.1"`; other strings would be pasted into GLSL);
+enum = index or value name (`"multiply"`); size = exponent within `first..last`; boolean; color =
+`{r,g,b,a}` / `[r,g,b(,a)]` / `"#rrggbb"`; gradient/curve/polygon/... = the object as in `get_graph full=true`
+(`{"type": "Gradient", ...}`). Floats outside the slider range are set, with a warning.
+`export` with `overwrite` deletes `<prefix>.*` and `<prefix>_*` in `output_dir` first (MM silently skips existing
+`.mat` files in command-line mode), listed in `deleted`.
+
+**Error codes:** `parse_error`, `bad_request`, `unknown_method`, `no_graph`, `bad_params`, `load_failed`,
+`unknown_node`, `unknown_type`, `unknown_parameter`, `bad_value`, `bad_port`, `port_type_mismatch`,
+`connection_rejected` (loop), `no_connection`, `cannot_delete` (Material), `save_failed`, `render_failed`,
+`no_material`, `export_failed`, `internal` (a script error aborted the method; see stderr).
+
+**Engine gotchas handled by the server** (found in 5.1): freeing a graph or node while `mm_deps` still renders its
+buffers leaves `mm_deps.do_update()` waiting forever and every later render hangs, so `load`/`remove_node` first
+wait for pending renders (a second `load` takes ~0.3–1.4 s); exporting replaces the Material node's preview
+textures (`process_shader` on the target's templates), so `export` rebuilds the preview afterwards, or later edits
+would never reach `render_preview`. Not checked: a broken expression only shows up in `validate` (renders just
+come out wrong).
+
+### Python client (`agent_tools/mm_client.py`, stdlib only)
+```python
+import sys; sys.path.insert(0, "agent_tools")
+from mm_client import MMClient, MMError
+with MMClient(log_path="agent_runs/x/server.log") as mm:   # Godot/project paths from mmx.toml
+    mm.load("material_maker/examples/bricks.ptex")          # relative paths are resolved by the client
+    mm.set_param("Perlin", scale_x=8, scale_y=8)
+    mm.render_preview("agent_runs/x/preview.png")
+    mm.export("agent_runs/x/out")                            # target from mmx.toml
+```
+Each method returns the result dict or raises `MMError(code, message)`; `last_warnings` holds the last
+request's warnings, `noise` the engine's recent stdout lines. Timeouts (default 180 s per request) kill the
+server (`MMError("timeout")`); a dead server raises `server_died`. `close()` / the context manager sends
+`shutdown`. CLI:
+- `python3 agent_tools/mm_client.py batch <file.jsonl> [--log f]`: one `{"method", "params"}` per line (`#` comments),
+  one result line each, through one server; exit 1 if any request failed.
+- `python3 agent_tools/mm_client.py bench <ptex> --node N --param P --values 2,4,8 [--render-node M] [--export]
+  [--out dir]`: the same sweep through the server and by relaunching the engine (mmx), with md5 comparison of
+  the renders; writes `bench.json`.
+
+Tests: `agent_tools/.venv/bin/python -m unittest agent_tools/test_mm_client.py` (fake server for the protocol,
+real server ~25 s; `MMX_SKIP_ENGINE=1` skips it); GUT `res://test/test_cli_serve.gd` (request parsing, value coercion).
+
 ## Other
 - `proto_0.3/`: throwaway Session 0.3 helpers (export.sh, g.py, sheet.py), superseded by
   `mmx export/sheet/run`; kept for reference.

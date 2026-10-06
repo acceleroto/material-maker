@@ -71,6 +71,11 @@ Reference, read on demand (don't inline them into your context all at once):
    another port. Normal-map nodes show MM's internal format (not the exported Unity normal colours).
    If several nodes must be judged together, a debug export still works: copy the ptex to
    `agent_runs/<run>/debug/dbg.ptex`, wire suspects into Material albedo (in 0), then `mmx export` + `mmx sheet`.
+   **Comparing several values of a parameter** (or many quick edits): use the engine server instead of
+   repeated `mmx` runs: one process, edits in memory, ~0.5 s per 3D preview vs ~4–7 s per relaunch:
+   `from mm_client import MMClient` (`agent_tools/mm_client.py`; `mm.load`, `mm.set_param`, `mm.render_preview`,
+   `mm.render_output`, `mm.validate`, `mm.save`; README "Server mode"). Render each value to its own PNG, Read
+   them side by side, `mm.save` the winner into the iteration's ptex and continue the loop with `mmx run`.
 7. **Decide**: all traits OK → stop and report. Otherwise go to 3 and change the 1–2 things that
    close the biggest gap. If an iteration made it worse, revert to the previous ptex rather than
    stacking fixes on a broken state.
