@@ -786,6 +786,10 @@ func m_export(params : Dictionary) -> Dictionary:
 		var before : Dictionary = parse_args.dir_snapshot(output_dir)
 		await c.export_material(file_prefix, export_target, size, true)
 		rv.files.append_array(parse_args.written_files(output_dir, before, name_prefix))
+	# Exporting runs process_shader() on the target's templates, which replaces the Material's preview
+	# textures (and deletes their mm_deps buffers): rebuild the preview, or later edits never reach it
+	await material.update()
+	await settle_renders()
 	if rv.files.is_empty():
 		fail("export_failed", "the export wrote no files to "+output_dir)
 		return {}

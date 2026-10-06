@@ -240,6 +240,21 @@ class TestRealServer(unittest.TestCase):
         r = self.mm.call("render_output", node="blend_0", output=str(self.dir / "reload.png"), size=64, timeout=30)
         self.assertTrue(Path(r["file"]).exists())
 
+    def test_preview_follows_edits_after_export(self):
+        """Regression: an export replaced the Material's preview textures, so later edits never reached render_preview."""
+        shots = []
+        for i, v in enumerate([16, 2]):
+            self.mm.export(self.dir / ("exp_follow%d" % i), size=64, prefix="b")
+            self.mm.set_param("Perlin", "scale_x", v)
+            png = self.dir / ("follow%d.png" % i)
+            self.mm.render_preview(png, size=64)
+            saved = self.dir / ("follow%d.ptex" % i)
+            self.mm.save(saved)
+            cli = mmx.render_preview(saved, self.dir / ("follow%d_cli.png" % i), size=64)
+            self.assertEqual(md5(png), md5(cli["file"]), "iteration %d" % i)
+            shots.append(md5(png))
+        self.assertNotEqual(shots[0], shots[1])
+
     def test_validate_reports_shader_errors(self):
         self.mm.set_param("Perlin", "scale_x", "$nonsense_variable")
         r = self.mm.validate()
