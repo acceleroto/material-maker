@@ -344,7 +344,7 @@ func describe_type(type : String) -> Dictionary:
 		generator = gen.get_script().get_global_name(),
 		label = gen.get_type_name(),
 		description = gen.get_description(),
-		parameters = gen.get_parameter_defs(),
+		parameters = parameter_defs_with_values(gen),
 		inputs = gen.get_input_defs(),
 		outputs = gen.get_output_defs()
 	}
@@ -363,6 +363,19 @@ func describe_type(type : String) -> Dictionary:
 	if container.get_parent() == self:
 		remove_child(container)
 	container.free()
+	return rv
+
+# Parameter definitions, with "default" set to the value a new node actually starts with (for
+# graphs, the def of a linked parameter carries the inner node's default, not the graph's value)
+static func parameter_defs_with_values(gen : MMGenBase) -> Array:
+	var rv : Array = []
+	for d in gen.get_parameter_defs():
+		var p : Dictionary = d.duplicate()
+		if p.has("name") and gen.parameters.has(p.name) and gen.parameters[p.name] != null:
+			if p.has("default") and JSON.stringify(to_json_safe(p.default)) != JSON.stringify(to_json_safe(gen.parameters[p.name])):
+				p.def_default = p.default
+			p.default = gen.parameters[p.name]
+		rv.append(p)
 	return rv
 
 func describe_nodes(types : Array, all : bool) -> Dictionary:

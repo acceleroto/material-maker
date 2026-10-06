@@ -104,7 +104,13 @@
   every node incl. sub-graph nodes via `MMComputeShader`, no rendering; skipped if the graph already has errors;
   exit 4 = invalid). All 43 examples in one launch: ~50 s, 1663 outputs; 42 clean, `doc_tools.ptex` has 2 real
   GLSL errors (`'input'` reserved word, undeclared `_seed_variation_`). GUT `test/test_cli_inspect.gd` (run with `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`;
-  `-gdir=res://test` also runs upstream doc tests that already fail).
+  `-gdir=res://test` also runs upstream doc tests that already fail). `--describe-node` reports a parameter's
+  `default` as the instantiated value (what an omitted .ptex parameter resolves to; the def's own default is kept
+  as `def_default` when different). mmx: `run_engine`, `engine_validate`, `validate_full` (Python first, engine only
+  if clean; `--fast`; `validate_engine` in mmx.toml; engine failure → `engine_unavailable` warning); `mmx catalog`
+  now merges engine data (`--static` = old path); `catalog.json`/`NODES.md` regenerated (engine_vs_static: only
+  comment_line, webcam differ; ~400 parameter defaults corrected, reroute/portal ports `any`). 44 mmx tests pass
+  (`TestRealEngine` ~1 min; `MMX_SKIP_ENGINE=1` skips it).
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).

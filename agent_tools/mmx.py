@@ -540,11 +540,85 @@ def build_catalog(nodes_dirs=None, library_dir=LIBRARY_DIR):
     return rv, {"load_errors": load_errors, "library_graphs": library_graphs}
 
 
+KIND_BY_GENERATOR = {"MMGenShader": "shader", "MMGenGraph": "graph", "MMGenMaterial": "material"}
+
+
+def _port_sig(ports):
+    return [p.get("type") for p in ports or []]
+
+
+def merge_engine_catalog(catalog, listing, described):
+    """Overlay what the engine reports (--list-nodes, --describe-node --all) on the static catalog.
+    The engine is authoritative for labels, descriptions, parameters, ports, categories and keywords; the
+    static catalog keeps generic templates, sources and `dynamic`/`superseded_by` hints.
+    Returns (entries, diffs): diffs lists the types where the static parse disagreed."""
+    entries = json.loads(json.dumps(catalog.entries))
+    diffs = []
+    lib = {}
+    for item in listing.get("items", []):
+        if item.get("inline_graph") or not item.get("type"):
+            continue
+        lib.setdefault(item["type"], []).append(item)
+    for n in described.get("nodes", []):
+        t = n["type"]
+        old = entries.get(t)
+        e = dict(old) if old else {"type": t, "source": "addons/material_maker/nodes/%s.mmg" % t}
+        e["kind"] = (old or {}).get("kind") or KIND_BY_GENERATOR.get(n.get("generator"), "builtin")
+        e["generator"] = n.get("generator")
+        if n.get("label") and n["label"] != "Unnamed":
+            e["label"] = n["label"]
+        for k in ("shortdesc", "longdesc"):
+            if n.get(k):
+                e[k] = n[k]
+            e.setdefault(k, "")
+        e["parameters"] = [norm_param(p) for p in n.get("parameters", [])]
+        e["inputs"] = [norm_input(p, i) for i, p in enumerate(n.get("inputs", []))]
+        e["outputs"] = [] if e["kind"] == "material" else [norm_output(p, i) for i, p in enumerate(n.get("outputs", []))]
+        items = lib.get(t, [])
+        if items:
+            e["library"] = [i["tree_item"] for i in items]
+            tree = items[0]["tree_item"]
+            e["category"] = tree.rsplit("/", 1)[0] if "/" in tree else tree
+            e["section"] = items[0]["category"]
+            kws = set()
+            for i in items:
+                kws.update(i.get("keywords", []))
+            if kws:
+                e["keywords"] = sorted(kws)
+        if old and not old.get("dynamic"):
+            changed = [f for f, a, b in (
+                ("parameters", [p["name"] for p in old.get("parameters", [])], [p["name"] for p in e["parameters"]]),
+                ("inputs", _port_sig(old.get("inputs")), _port_sig(e["inputs"])),
+                ("outputs", _port_sig(old.get("outputs")), _port_sig(e["outputs"]))) if a != b]
+            if changed:
+                diffs.append({"type": t, "fields": changed})
+        entries[t] = e
+    in_lib = {t for t, e in entries.items() if e.get("library")}
+    for t, e in entries.items():
+        e["in_library"] = t in in_lib
+    return dict(sorted(entries.items())), diffs
+
+
 def cmd_catalog(args):
     dirs = [NODES_DIR] + [Path(d) for d in (args.nodes_dir or [])]
     catalog, info = build_catalog(dirs)
+    generated_by = "agent_tools/mmx.py catalog --static"
+    diffs = None
+    if not args.static:
+        if args.nodes_dir:
+            raise SystemExit("mmx: --nodes-dir needs --static (the engine reads its own node dirs)")
+        cfg = load_config(args.config)
+        listing, li = run_engine(["--list-nodes"], cfg)
+        described, di = run_engine(["--describe-node", "--all"], cfg) if listing else (None, {})
+        if not listing or not described or not listing.get("ok") or not described.get("ok"):
+            err = li.get("error") or di.get("error") or "; ".join(((listing or {}).get("errors") or []) +
+                                                                  ((described or {}).get("errors") or []))
+            raise SystemExit("mmx: engine catalog failed (%s); use --static for the Python-only catalog" % err)
+        entries, diffs = merge_engine_catalog(catalog, listing, described)
+        catalog = Catalog(entries, catalog.port_types)
+        generated_by = "agent_tools/mmx.py catalog (engine: --list-nodes, --describe-node --all)"
     data = {
-        "generated_by": "agent_tools/mmx.py catalog",
+        "generated_by": generated_by,
         "nodes_dirs": [str(d.relative_to(REPO)) if d.is_relative_to(REPO) else str(d) for d in dirs],
         "notes": [
             "Ports are 0-based indices into inputs/outputs; connections are {from, from_port, to, to_port}.",
@@ -554,6 +628,7 @@ def cmd_catalog(args):
         ],
         "load_errors": info["load_errors"],
         "library_graphs": info["library_graphs"],
+        **({"engine_vs_static": diffs} if diffs is not None else {}),
         "port_types": catalog.port_types,
         "types": catalog.entries,
     }
@@ -561,7 +636,8 @@ def cmd_catalog(args):
     n_lines = write_nodes_md(catalog)
     print(json.dumps({"catalog": str(CATALOG_PATH.relative_to(REPO)), "types": len(catalog.entries),
                       "nodes_md": str(NODES_MD_PATH.relative_to(REPO)), "nodes_md_lines": n_lines,
-                      "load_errors": info["load_errors"]}, indent=1))
+                      "load_errors": info["load_errors"],
+                      **({"engine_vs_static_diffs": len(diffs)} if diffs is not None else {})}, indent=1))
     return 0
 
 
@@ -1101,8 +1177,33 @@ def validate_file(path, catalog=None):
     return {"ok": not v.errors, "errors": v.errors, "warnings": v.warnings}
 
 
+def validate_full(path, cfg=None, fast=False, timeout=None):
+    """Python validation (fast pre-check), then, if that passed, the engine's --validate (unknown types,
+    connections, shader compilation). Engine problems (no Godot, timeout) only add a warning."""
+    cfg = cfg or load_config()
+    result = validate_file(path)
+    result["checks"] = ["static"]
+    if fast or not cfg.get("validate_engine", True):
+        return result
+    if not result["ok"]:
+        result["warnings"].append({"code": "engine_check_skipped", "graph_path": "/", "node": None,
+                                   "message": "Engine validation not run: fix the errors above first."})
+        return result
+    e = engine_validate(path, cfg, timeout)
+    if not e["available"]:
+        result["warnings"].append({"code": "engine_unavailable", "graph_path": "/", "node": None,
+                                   "message": "Engine validation not run: %s" % e["error"]})
+        return result
+    result["checks"].append("engine")
+    result["engine"] = {k: e[k] for k in ("seconds", "nodes", "outputs_checked")}
+    result["errors"] += e["errors"]
+    result["warnings"] += e["warnings"]
+    result["ok"] = not result["errors"]
+    return result
+
+
 def cmd_validate(args):
-    result = validate_file(args.ptex)
+    result = validate_full(args.ptex, load_config(args.config), args.fast, args.timeout)
     print(json.dumps(result, indent=1, ensure_ascii=False))
     return 0 if result["ok"] else 1
 
@@ -1393,6 +1494,65 @@ def cmd_export(args):
 
 
 # ---------------------------------------------------------------------------
+# engine CLI modes (cli_inspect.gd: --list-nodes, --describe-node, --validate; source mode only)
+# ---------------------------------------------------------------------------
+
+ENGINE_EXIT_CODES = {1: "bad arguments", 2: "load failure", 4: "validation errors"}
+
+
+def run_engine(mm_args, cfg=None, timeout=None):
+    """Run one engine inspection mode with --json. Returns (summary or None, info).
+    info: {"seconds", "exit_code", "error"?}; summary is the parsed {"mm_cli": 1, ...} line."""
+    import os
+    import signal
+    import subprocess
+    import tempfile
+    import time
+    cfg = cfg or load_config()
+    if cfg["mode"] != "source":
+        return None, {"error": "engine checks need mode = \"source\" in mmx.toml (the release app lacks them)"}
+    cmd = [cfg["source"]["godot"], "--path", cfg["source"]["project"]] + list(mm_args) + ["--json"]
+    timeout = float(timeout or cfg["timeout"])
+    start = time.time()
+    with tempfile.TemporaryFile("w+") as out, tempfile.TemporaryFile("w+") as err:
+        try:
+            proc = subprocess.Popen(cmd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            return None, {"error": "cannot start Godot: %s" % e}
+        try:
+            rc = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+            return None, {"error": "timeout after %ss" % timeout, "seconds": round(time.time() - start, 2)}
+        out.seek(0)
+        err.seek(0)
+        text, err_text = out.read(), err.read()
+    info = {"seconds": round(time.time() - start, 2), "exit_code": rc}
+    summary = parse_mm_summary(text)
+    if summary is None:
+        tail = [l for l in err_text.splitlines() if "ERROR" in l and not any(h in l for h in HARMLESS_LOG)][-3:]
+        info["error"] = "no JSON summary from the engine (exit code %s)%s" % (rc, ": " + " | ".join(tail) if tail else "")
+    return summary, info
+
+
+def engine_validate(ptex, cfg=None, timeout=None):
+    """Engine validation of one .ptex: {"available", "ok", "errors", "warnings", "seconds", ...}."""
+    summary, info = run_engine(["--validate", str(Path(ptex).resolve())], cfg, timeout)
+    if summary is None:
+        return {"available": False, "error": info["error"]}
+    files = summary.get("files") or []
+    if not files:  # bad arguments
+        return {"available": False, "error": "; ".join(summary.get("errors") or []) or "no result"}
+    f = files[0]
+    for item in f.get("errors", []) + f.get("warnings", []):
+        item["source"] = "engine"
+    return {"available": True, "ok": f.get("ok", False), "errors": f.get("errors", []),
+            "warnings": f.get("warnings", []), "seconds": info["seconds"], "nodes": f.get("nodes"),
+            "outputs_checked": f.get("outputs_checked")}
+
+
+# ---------------------------------------------------------------------------
 # sheet (needs Pillow: agent_tools/.venv, see README)
 # ---------------------------------------------------------------------------
 
@@ -1635,9 +1795,14 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("catalog", help="build agent_tools/catalog.json and agent_docs/NODES.md")
     p.add_argument("--nodes-dir", action="append", help="extra .mmg dir (e.g. the release app's nodes/); overrides repo defs")
+    p.add_argument("--static", action="store_true", help="parse .mmg files in Python only (no engine)")
+    p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
     p.set_defaults(fn=cmd_catalog)
-    p = sub.add_parser("validate", help="validate a .ptex file; JSON result, exit 0/1")
+    p = sub.add_parser("validate", help="validate a .ptex file (Python checks, then the engine's); JSON result, exit 0/1")
     p.add_argument("ptex")
+    p.add_argument("--fast", action="store_true", help="Python checks only (no Godot launch, no shader compile)")
+    p.add_argument("--timeout", type=float, help="seconds before the engine check is killed (default from mmx.toml)")
+    p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
     p.set_defaults(fn=cmd_validate)
     p = sub.add_parser("node", help="print one node type's catalog entry")
     p.add_argument("type")

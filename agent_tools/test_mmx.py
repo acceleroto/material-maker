@@ -58,7 +58,8 @@ class TestExamples(Base):
     def test_cli_ok_exit_code(self):
         rc, r = run_validate(BRICKS)
         self.assertEqual(rc, 0)
-        self.assertEqual(r, {"ok": True, "errors": [], "warnings": []})
+        self.assertEqual({k: r[k] for k in ("ok", "errors", "warnings")}, {"ok": True, "errors": [], "warnings": []})
+        self.assertIn("static", r["checks"])
 
 
 class TestBrokenCopies(Base):
@@ -342,6 +343,215 @@ class TestSheet(unittest.TestCase):
             self.assertEqual(labels, ["lit", "lit", "albedo", "normal", "roughness", "metallic"])
             self.assertIn("min 0.75", r["tiles"][4])  # roughness = 1 - smoothness(64/255)
             self.assertEqual(mmx.make_sheet(t)["sources"].keys(), r["sources"].keys())  # ignores sheet.png
+
+
+# A stand-in for Godot running cli_inspect.gd: prints the canned summary in $FAKE_ENGINE_SUMMARY
+# (or nothing with FAKE_ENGINE_MODE=nojson, or hangs with FAKE_ENGINE_MODE=hang).
+FAKE_ENGINE = """#!/usr/bin/env python3
+import json, os, sys, time
+mode = os.environ.get("FAKE_ENGINE_MODE", "ok")
+if mode == "hang":
+    time.sleep(60)
+print("Godot Engine v4 - noise")
+if mode != "nojson":
+    s = json.loads(os.environ["FAKE_ENGINE_SUMMARY"])
+    s["argv"] = sys.argv[1:]
+    print(json.dumps(s))
+sys.exit(int(os.environ.get("FAKE_ENGINE_EXIT", "0")))
+"""
+
+
+def engine_summary(errors=(), warnings=(), ok=None):
+    ok = not errors if ok is None else ok
+    return {"mm_cli": 1, "mode": "validate", "ok": ok, "exit_code": 0 if ok else 4, "errors": [], "warnings": [],
+            "files": [{"input": "x.ptex", "ok": ok, "nodes": 3, "outputs_checked": 5,
+                       "errors": list(errors), "warnings": list(warnings)}]}
+
+
+class TestEngineValidate(unittest.TestCase):
+    def setUp(self):
+        import os
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        fake = Path(self.tmp.name) / "fake_godot"
+        fake.write_text(FAKE_ENGINE)
+        fake.chmod(0o755)
+        self.cfg = mmx.load_config()
+        self.cfg["mode"] = "source"
+        self.cfg["source"]["godot"] = str(fake)
+        self.cfg["timeout"] = 3
+        self.env = {}
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in self.env])
+
+    def setenv(self, **kw):
+        import os
+        for k, v in kw.items():
+            os.environ[k] = v if isinstance(v, str) else json.dumps(v)
+            self.env[k] = True
+
+    def test_engine_errors_are_merged(self):
+        err = {"code": "shader_compile_error", "graph_path": "/", "node": "custom", "message": "custom: bad"}
+        self.setenv(FAKE_ENGINE_SUMMARY=engine_summary([err]), FAKE_ENGINE_EXIT="4")
+        r = mmx.validate_full(BRICKS, self.cfg)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["checks"], ["static", "engine"])
+        self.assertEqual([e["code"] for e in r["errors"]], ["shader_compile_error"])
+        self.assertEqual(r["errors"][0]["source"], "engine")
+        self.assertEqual(r["engine"]["outputs_checked"], 5)
+
+    def test_engine_argv(self):
+        self.setenv(FAKE_ENGINE_SUMMARY=engine_summary())
+        summary, info = mmx.run_engine(["--validate", "/abs/x.ptex"], self.cfg)
+        self.assertEqual(summary["argv"], ["--path", self.cfg["source"]["project"], "--validate", "/abs/x.ptex", "--json"])
+        self.assertEqual(info["exit_code"], 0)
+
+    def test_clean(self):
+        self.setenv(FAKE_ENGINE_SUMMARY=engine_summary())
+        r = mmx.validate_full(BRICKS, self.cfg)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["checks"], ["static", "engine"])
+
+    def test_fast_and_config_skip_engine(self):
+        self.setenv(FAKE_ENGINE_MODE="hang")
+        self.assertEqual(mmx.validate_full(BRICKS, self.cfg, fast=True)["checks"], ["static"])
+        self.cfg["validate_engine"] = False
+        self.assertEqual(mmx.validate_full(BRICKS, self.cfg)["checks"], ["static"])
+
+    def test_static_errors_skip_engine(self):
+        self.setenv(FAKE_ENGINE_MODE="hang")
+        with tempfile.NamedTemporaryFile("w", suffix=".ptex", delete=False) as f:
+            f.write("{not json")
+        r = mmx.validate_full(f.name, self.cfg)
+        Path(f.name).unlink()
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["checks"], ["static"])
+        self.assertIn("engine_check_skipped", [w["code"] for w in r["warnings"]])
+
+    def test_engine_unavailable_is_a_warning(self):
+        for mode in ("nojson", "hang"):
+            with self.subTest(mode=mode):
+                self.setenv(FAKE_ENGINE_MODE=mode, FAKE_ENGINE_SUMMARY=engine_summary())
+                r = mmx.validate_full(BRICKS, self.cfg)
+                self.assertTrue(r["ok"])
+                self.assertEqual(r["checks"], ["static"])
+                self.assertEqual([w["code"] for w in r["warnings"]][-1:], ["engine_unavailable"])
+        self.cfg["mode"] = "release"
+        r = mmx.validate_full(BRICKS, self.cfg)
+        self.assertIn("source", r["warnings"][-1]["message"])
+
+
+class TestEngineCatalogMerge(unittest.TestCase):
+    def test_merge(self):
+        static = mmx.Catalog({
+            "bricks3": {"type": "bricks3", "kind": "shader", "label": "Bricks", "shortdesc": "", "longdesc": "",
+                        "parameters": [{"name": "rows", "type": "float"}], "inputs": [], "outputs": [],
+                        "source": "addons/material_maker/nodes/bricks3.mmg", "category": "Uncategorized"}})
+        listing = {"items": [
+            {"tree_item": "Pattern/Bricks", "category": "Pattern", "type": "bricks3", "inline_graph": False,
+             "keywords": ["wall"]},
+            {"tree_item": "Pattern/Bricks/Tiles", "category": "Pattern", "type": "bricks3", "inline_graph": False,
+             "keywords": ["tile"]},
+            {"tree_item": "Workflow/Materials/Wood", "category": "Workflow", "type": "graph", "inline_graph": True}]}
+        described = {"nodes": [
+            {"type": "bricks3", "generator": "MMGenShader", "label": "Bricks", "shortdesc": "Bricks!",
+             "parameters": [{"name": "rows", "type": "float", "default": 6, "min": 1, "max": 64, "label": "Rows"},
+                            {"name": "pattern", "type": "enum", "default": 0,
+                             "values": [{"name": "Running Bond", "value": "rb"}]}],
+             "inputs": [{"name": "mortar_map", "type": "f", "label": "6:"}],
+             "outputs": [{"type": "f", "f": "$(name_uv).x"}, {"type": "fill"}]},
+            {"type": "newtype", "generator": "MMGenGraph", "label": "New", "parameters": [], "inputs": [], "outputs": []}]}
+        entries, diffs = mmx.merge_engine_catalog(static, listing, described)
+        b = entries["bricks3"]
+        self.assertEqual(b["shortdesc"], "Bricks!")
+        self.assertEqual([p["name"] for p in b["parameters"]], ["rows", "pattern"])
+        self.assertEqual(b["parameters"][1]["values"], ["Running Bond"])
+        self.assertEqual(b["outputs"], [{"index": 0, "type": "f"}, {"index": 1, "type": "fill"}])
+        self.assertEqual(b["library"], ["Pattern/Bricks", "Pattern/Bricks/Tiles"])
+        self.assertEqual((b["category"], b["section"]), ("Pattern", "Pattern"))
+        self.assertEqual(b["keywords"], ["tile", "wall"])
+        self.assertTrue(b["in_library"])
+        self.assertEqual(b["source"], "addons/material_maker/nodes/bricks3.mmg")
+        self.assertEqual(entries["newtype"]["kind"], "graph")
+        self.assertFalse(entries["newtype"]["in_library"])
+        self.assertEqual(diffs, [{"type": "bricks3", "fields": ["parameters", "inputs", "outputs"]}])
+
+    def test_generated_catalog_is_engine_based(self):
+        data = json.loads(mmx.CATALOG_PATH.read_text())
+        self.assertIn("engine", data["generated_by"])
+        self.assertEqual(data["types"]["gaussian_blur"]["parameters"][1]["default"], 4.8)  # graph value, not def
+        self.assertEqual(data["types"]["reroute"]["inputs"][0]["type"], "any")
+
+
+def godot_available():
+    import os
+    cfg = mmx.load_config()
+    return (cfg["mode"] == "source" and Path(cfg["source"]["godot"]).exists()
+            and not os.environ.get("MMX_SKIP_ENGINE"))
+
+
+@unittest.skipUnless(godot_available(), "needs Godot + mode = source (set MMX_SKIP_ENGINE=1 to skip)")
+class TestRealEngine(Base):
+    """Runs the real engine (~1 min). Fixtures are broken copies of bricks.ptex."""
+
+    def engine(self, *args, timeout=600):
+        summary, info = mmx.run_engine(list(args), timeout=timeout)
+        self.assertIsNotNone(summary, info)
+        return summary, info
+
+    def test_examples(self):
+        summary, info = self.engine("--validate", *[str(f) for f in EXAMPLES])
+        self.assertEqual(len(summary["files"]), len(EXAMPLES))
+        for f in summary["files"]:
+            with self.subTest(example=Path(f["input"]).name):
+                if Path(f["input"]).name == "doc_tools.ptex":
+                    # MM's documentation helper graph really has GLSL errors ('input' is a reserved word)
+                    self.assertEqual({e["code"] for e in f["errors"]}, {"shader_compile_error"})
+                else:
+                    self.assertTrue(f["ok"], json.dumps(f["errors"][:2]))
+                    self.assertGreater(f["outputs_checked"], 0)
+
+    def test_broken(self):
+        def custom_bad(d):
+            m = next(n for n in json.loads((BRICKS.parent / "mandelbrot.ptex").read_text())["nodes"] if "shader_model" in n)
+            m["name"] = "custom_bad"
+            out = m["shader_model"]["outputs"][0]
+            out[next(k for k in out if k in ("f", "rgb", "rgba"))] = "undefined_thing_xyz($(uv))"
+            d["nodes"].append(m)
+            d["connections"].append({"from": "custom_bad", "from_port": 0, "to": "colorize_0", "to_port": 0})
+            d["connections"] = [c for c in d["connections"] if not (c["to"] == "colorize_0" and c["from"] == "Perlin")]
+
+        files = {
+            "unknown_type": self.broken_copy("e_type.ptex", lambda d: self.node(d, "Perlin").update(type="perlinn")),
+            "bad_output_port": self.broken_copy("e_port.ptex", lambda d: d["connections"].append(
+                {"from": "Perlin", "from_port": 7, "to": "blend_2", "to_port": 0})),
+            "port_type_mismatch": self.broken_copy("e_mismatch.ptex", lambda d: (
+                d["nodes"].append({"name": "bx", "type": "bricks3", "parameters": {}}),
+                d["connections"].append({"from": "bx", "from_port": 1, "to": "blend_2", "to_port": 0}))),
+            "shader_compile_error": self.broken_copy("e_glsl.ptex", custom_bad),
+        }
+        summary, info = self.engine("--validate", *[str(f) for f in files.values()])
+        self.assertEqual(info["exit_code"], 4)
+        self.assertFalse(summary["ok"])
+        for (code, path), f in zip(files.items(), summary["files"]):
+            with self.subTest(code=code):
+                self.assertFalse(f["ok"])
+                self.assertIn(code, {e["code"] for e in f["errors"]}, json.dumps(f["errors"]))
+        glsl = next(e for e in summary["files"][3]["errors"] if e["code"] == "shader_compile_error")
+        self.assertEqual(glsl["node"], "custom_bad")
+        self.assertIn("undefined_thing_xyz", glsl["message"])
+
+    def test_describe_and_list(self):
+        summary, _ = self.engine("--describe-node", "bricks3", "nosuch")
+        self.assertEqual(summary["exit_code"], 2)
+        self.assertEqual([n["type"] for n in summary["nodes"]], ["bricks3"])
+        summary, _ = self.engine("--list-nodes")
+        self.assertTrue(summary["ok"])
+        self.assertIn("Pattern/Bricks", {i["tree_item"] for i in summary["items"]})
+
+    def test_mmx_validate_cli(self):
+        rc, r = run_validate(BRICKS)
+        self.assertEqual(rc, 0)
+        self.assertEqual(r["checks"], ["static", "engine"])
 
 
 if __name__ == "__main__":
