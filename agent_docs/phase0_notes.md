@@ -61,3 +61,65 @@ outputs** (md5 vs. a baseline export) rather than trusting that a parameter took
 - Harmless noise on every run: `Cannot open user://export_targets`, and at exit
   `6 ObjectDB instances were leaked` / `1 resources still in use`.
 - Reading the graph needs care: which blend input is "top", and that mask=0 selects port 1.
+
+## Session 0.3 — tiny real loop: "weathered red roof tiles, slightly mossy, stylized", 2026-10-05
+
+Files: `agent_runs/0.3/` (gitignored): `baseline/` (unmodified `improved_brick.ptex` + export),
+`iter_1..5/` each with `build.py` (the edit script, applied to the previous iteration's ptex),
+`roof.ptex`, `out/` (Unity/URP export), `sheet.png`, `critique.md`. Helper prototypes copied to
+`agent_tools/proto_0.3/`.
+
+**Base:** the release has no roof example. I picked `improved_brick.ptex`: a flat graph (no subgraphs)
+of bricks, Perlin weathering and a separate height/normal/AO chain, so it's easy to rewire.
+
+**Path:** iter 1 recoloured it and added a per-tile overlap ramp (`bricks` port 4 "Brick UV" →
+`decompose` G → colorize → × tile mask), but it read as cobbles because the gaps were too wide.
+Iter 2 added thin gaps, a barrel curve (Brick UV R) and moss restricted to low areas; it read as a
+roof, but I made the noise worse with a wiring mistake. Iter 3 fixed the noise and gave the first
+good read. Iter 4 added two-tone moss and a height-driven multiply tint, but was too dark.
+Iter 5 rebalanced the brightness: final.
+
+### Did the loop converge?
+**Yes, roughly.** Iteration 5 is a recognisable, seamless, stylized red tile roof with light moss.
+Each iteration improved on the last except iter 2's noise mistake, which I caught and reverted in iter 3.
+It did not converge on *nice*: the tiles are rounded squares rather than scallop or S-tile shapes,
+the moss has no relief, and roughness is constant. Five iterations was enough for "plausible", not "good".
+Wall time per iteration: ~5 s export + ~1 s sheet; the time went into reading the graph and judging the result.
+
+### What blocked me most (ranked)
+1. **Graph semantics / wiring (biggest).** Which blend port is the top layer, what `amount` fades,
+   that `normal_map` is a subgraph whose strength is the anonymous `param1`, and what range "Brick UV"
+   covers (normalised by the brick's *larger* side, so V spans only part of 0–1). In iter 2 I lowered
+   `blend_3.amount` to "reduce noise" and faded out the *tile* normal instead, a whole iteration lost.
+   Per-port descriptions exist in `.mmg` (`shortdesc`/`longdesc`) but not for subgraph nodes, and
+   nothing tells you which input of `blend` is s1 vs s2 except reading the GLSL.
+2. **Judging from flat maps.** Albedo/normal/height on their own don't show whether it "reads as a
+   roof". I had to write a Lambert preview (albedo × N·L × AO, 1× / 2×2 tiled / crop) to judge at all,
+   and it's a guess at Unity's convention (Y flip) and lighting. I couldn't tell how dark the overlap gaps will be in
+   URP, or whether the AO is double-counted. It also can't show parallax/height or roughness.
+3. **No per-node preview.** To see whether the new ramp/barrel nodes did what I meant, I had to
+   route them to the Material and export everything. A "render node X port N" would have caught
+   the iter 2 mistake in seconds.
+4. **Unknown node types** were a minor issue: the `.mmg` files gave me params/enums/ports for `bricks`,
+   `decompose`, `math`, `colorize`, `blend` quickly. Subgraph-defined nodes (`normal_map`) were the
+   exception (`param0..4` with links to inner nodes).
+5. **Slow exports: not a blocker** (~5 s). The Bash-hang workaround (launch in the Terminal panel,
+   poll a `DONE` marker file from Bash) worked every time; it's just clunky.
+
+Other observations:
+- Graphs without a roughness input export **no** `metal_smoothness` PNG (improved_brick: 4 maps only).
+- Connecting an `rgba` colorize into a `math` `f` input worked (implicit conversion).
+- Adding new nodes only needs `name`, `type`, `node_position`, `parameters` (no `seed`); unspecified
+  params take defaults.
+- Pillow isn't installed system-wide; I used a venv in the scratchpad. Phase 1 `mmx` needs a documented
+  setup (`pip install pillow numpy` or a project venv).
+
+### Tools that would have helped most
+1. **Lit 3D preview** (Phase 4.2), ideally sphere + plane at a fixed light, as the main image to judge.
+   That's the biggest gap.
+2. **`mmx describe-node` with port semantics** (Phase 1.1/3.1), including subgraph nodes' real param
+   labels and "which blend input is on top".
+3. **Single-node render** (Phase 4.1) for debugging a stage of the graph.
+4. **`mmx run` + `mmx sheet`** (Phase 1.2): my `export.sh` + `sheet.py` + `g.py` prototypes in
+   `agent_tools/proto_0.3/` are a working sketch of these; they cut iteration overhead a lot.
+5. A small edit API (set/add/wire by name) rather than hand-editing JSON; `g.py` was ~20 lines and enough.

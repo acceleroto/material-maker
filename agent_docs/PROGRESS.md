@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 0.2 (complete)
+**Current session:** 0.3 (complete)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -23,6 +23,14 @@
   (use the Terminal panel); `Bricks.repeat/rows/columns` edits had NO effect on output
   (unexplained); exporter won't create nested out dirs and doesn't quit on that error.
   CLAUDE.md updated with the export workaround.
+- 0.3 (agent, 2026-10-05): 5-iteration loop on "weathered red roof tiles, slightly mossy,
+  stylized", starting from release `examples/improved_brick.ptex` (no roof example exists).
+  `agent_runs/0.3/iter_1..5/` each have build.py, roof.ptex, out/ (Unity/URP), sheet.png,
+  critique.md. Converged roughly: iter 5 is a plausible stylized mossy red roof. Biggest blockers:
+  graph/port semantics (lost iter 2 to a blend-port mistake), then judging from flat maps
+  (wrote a Lambert-lit preview sheet). Findings + tool wishlist appended to phase0_notes.md.
+  Prototype helpers (export.sh with DONE marker, g.py edit API, sheet.py) in
+  `agent_tools/proto_0.3/`.
 
 ## In progress
 - None.
@@ -32,8 +40,8 @@
   (check in GUI when convenient). Exports must run via `run_in_terminal`.
 
 ## Next step
-- Session 0.3 per ROADMAP.md "### 0.3": read CLAUDE.md, PROGRESS.md and
-  `agent_docs/phase0_notes.md`; goal "weathered red roof tiles, slightly mossy, stylized";
-  start from the closest release example, max 5 iterations in `agent_runs/0.3/iter_N/` with a
-  `critique.md` each; export via the Terminal panel with absolute paths; append findings to
-  phase0_notes.md; commit; next = 0.4 (human decision).
+- 0.4 — **human decision** (see ROADMAP.md "### 0.4"): the user opens `agent_runs/0.3/`
+  (look at `iter_*/sheet.png` + `critique.md`), reads the 0.3 section of
+  `agent_docs/phase0_notes.md`, and chooses: Phase 1 (normal path), Phase 1 then prioritise
+  Phase 4 (previews), or troubleshoot export. Agent's recommendation: Phase 1, then prioritise
+  Phase 4: flat maps were the second-biggest blocker. No agent work until the user decides.
