@@ -4,13 +4,24 @@ extends Node
 #   --list-nodes [--json]                     node types and add-node menu items
 #   --describe-node <type>... | --all [--json] parameters and ports of instantiated generators
 #   --validate <file.ptex>... [--json]        missing types, bad connections, shader compile errors
+#   --render-output <file.ptex> --node <name> [--port <n>] [--size <px>] -o <file.png> [--json]
+#                                             render one output of one node (a/b for sub-graph nodes)
 
 const EXIT_OK : int = 0
 const EXIT_BAD_ARGS : int = 1
 const EXIT_LOAD : int = 2
+const EXIT_RENDER : int = 3
 const EXIT_INVALID : int = 4
 
-const MODES : Array[String] = [ "--list-nodes", "--describe-node", "--validate" ]
+const MODES : Array[String] = [ "--list-nodes", "--describe-node", "--validate", "--render-output" ]
+
+# --render-output defaults and limits
+const RENDER_DEFAULT_SIZE : int = 512
+const RENDER_MIN_SIZE : int = 16
+const RENDER_MAX_SIZE : int = 8192
+const RENDER_EXTENSIONS : Array[String] = [ "png", "exr", "jpg", "webp" ]
+# Options that take a value, only valid with --render-output
+const RENDER_OPTIONS : Array[String] = [ "--node", "--port", "--size", "-o", "--output" ]
 
 # Same values as the NodeLibraryManager node in material_maker/main_window.tscn
 const LIBRARY_MANAGER_SETTINGS : Dictionary = {
@@ -56,7 +67,8 @@ class ShaderErrorCapture:
 
 
 static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
-	var rv : Dictionary = { mode = "", types = [] as Array[String], all = false, files = [] as Array[String], json = false, errors = [] as Array[String] }
+	var rv : Dictionary = { mode = "", types = [] as Array[String], all = false, files = [] as Array[String], json = false,
+			node = "", port = 0, size = RENDER_DEFAULT_SIZE, output = "", errors = [] as Array[String] }
 	var start : int = -1
 	for m : String in MODES:
 		var index : int = args.find(m)
@@ -65,7 +77,9 @@ static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 	if start == -1:
 		rv.errors.append("no mode (expected one of %s)" % ", ".join(MODES))
 		return rv
-	for i in range(start, args.size()):
+	var render_options : Array[String] = []
+	var i : int = start
+	while i < args.size():
 		var arg : String = args[i]
 		if arg in MODES:
 			if rv.mode != "" and rv.mode != arg:
@@ -77,15 +91,41 @@ static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 			rv.all = true
 		elif arg == "--no-splash":
 			pass
+		elif arg in RENDER_OPTIONS:
+			if i+1 >= args.size():
+				rv.errors.append("%s needs a value" % arg)
+				break
+			i += 1
+			var value : String = args[i]
+			render_options.append(arg)
+			match arg:
+				"--node":
+					rv.node = value
+				"--port":
+					if not value.is_valid_int() or value.to_int() < 0:
+						rv.errors.append("invalid --port %s (expected an output index >= 0)" % value)
+					else:
+						rv.port = value.to_int()
+				"--size":
+					if not value.is_valid_int() or value.to_int() < RENDER_MIN_SIZE or value.to_int() > RENDER_MAX_SIZE:
+						rv.errors.append("invalid --size %s (expected %d..%d)" % [ value, RENDER_MIN_SIZE, RENDER_MAX_SIZE ])
+					else:
+						rv.size = value.to_int()
+				_:
+					rv.output = value
 		elif arg.begins_with("-"):
 			rv.errors.append("unknown option "+arg)
 		elif rv.mode == "--describe-node":
 			rv.types.append(arg)
-		elif rv.mode == "--validate":
+		elif rv.mode == "--validate" or rv.mode == "--render-output":
 			rv.files.append(arg)
 		else:
 			rv.errors.append("unexpected argument "+arg)
+		i += 1
 	if not rv.errors.is_empty():
+		return rv
+	if rv.mode != "--render-output" and not render_options.is_empty():
+		rv.errors.append("%s is only valid with --render-output" % render_options[0])
 		return rv
 	match rv.mode:
 		"--describe-node":
@@ -96,9 +136,17 @@ static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 		"--validate":
 			if rv.files.is_empty():
 				rv.errors.append("no input file")
-		_:
-			if rv.all:
-				rv.errors.append("--all is only valid with --describe-node")
+		"--render-output":
+			if rv.files.size() != 1:
+				rv.errors.append("--render-output takes exactly one input file")
+			if rv.node == "":
+				rv.errors.append("no node (expected --node <name>)")
+			if rv.output == "":
+				rv.errors.append("no output file (expected -o <file.png>)")
+			elif not RENDER_EXTENSIONS.has(rv.output.get_extension().to_lower()):
+				rv.errors.append("unsupported output file %s (expected %s)" % [ rv.output.get_file(), "/".join(RENDER_EXTENSIONS) ])
+	if rv.all and rv.mode != "--describe-node":
+		rv.errors.append("--all is only valid with --describe-node")
 	return rv
 
 # Converts engine values (Color, Vector*, objects with serialize()) to JSON compatible data
@@ -233,6 +281,8 @@ func run(h : Node, args : PackedStringArray) -> void:
 				result = await describe_nodes(options.types, options.all)
 			"--validate":
 				result = await validate_files(options.files)
+			"--render-output":
+				result = await render_output_file(options.files[0], options.node, options.port, options.size, options.output)
 	if options.json:
 		var summary : Dictionary = {
 			mm_cli = 1,
@@ -573,3 +623,79 @@ func check_shaders(gen : MMGenBase, rv : Dictionary) -> void:
 				e.outputs = [ output ]
 				reported[key] = e
 				rv.errors.append(e)
+
+# --render-output
+
+# Short description of a node's outputs, to help pick a --port
+static func output_summary(gen : MMGenBase) -> Array[Dictionary]:
+	var rv : Array[Dictionary] = []
+	var defs : Array = gen.get_output_defs()
+	for i in defs.size():
+		var d : Dictionary = defs[i] if defs[i] is Dictionary else {}
+		rv.append({ index=i, type=d.get("type", "any"), label=d.get("shortdesc", d.get("name", "")) })
+	return rv
+
+# Names of the nodes of a graph that have outputs (for error messages)
+static func renderable_node_names(graph : MMGenBase, max_count : int = 40) -> String:
+	var names : PackedStringArray = PackedStringArray()
+	for c in graph.get_children():
+		if c is MMGenBase and not c.get_output_defs().is_empty() and not NO_SHADER_TYPES.has(c.get_type()):
+			names.append(c.name)
+	names.sort()
+	if names.size() > max_count:
+		return ", ".join(names.slice(0, max_count))+", ..."
+	return ", ".join(names)
+
+# Same wait as MMGenMaterial.export_material: nodes downstream of buffers read the buffers' textures
+func wait_for_buffers() -> void:
+	if mm_deps.get_render_queue_size() > 0:
+		var render_queue_size : int = mm_deps.get_render_queue_size()
+		while true:
+			mm_deps.update()
+			await mm_deps.updated
+			if render_queue_size == mm_deps.get_render_queue_size():
+				break
+			render_queue_size = mm_deps.get_render_queue_size()
+
+func render_output_file(path : String, node_path : String, port : int, size : int, output : String) -> Dictionary:
+	var rv : Dictionary = { input=path, node=node_path, port=port, size=size, file="" }
+	# The rendering device is created by the rendering thread shortly after startup
+	var deadline : int = Time.get_ticks_msec()+5000
+	while mm_renderer.rendering_device == null and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	if mm_renderer.rendering_device == null:
+		host.show_error("no rendering device (headless?), cannot render", EXIT_RENDER)
+		return rv
+	var gen : MMGenBase = await mm_loader.load_gen(path)
+	if gen == null:
+		host.show_error("Cannot load %s (%s)" % [ path, "not a valid material file" if FileAccess.file_exists(path) else "no such file" ], EXIT_LOAD)
+		return rv
+	add_child(gen)
+	var node : Node = gen.get_node_or_null(NodePath(node_path))
+	if node == null or not node is MMGenBase:
+		var parent : Node = gen.get_node_or_null(NodePath(node_path.get_base_dir())) if node_path.contains("/") else gen
+		var where : String = "in "+node_path.get_base_dir() if node_path.contains("/") else "at the top level"
+		var available : String = renderable_node_names(parent) if parent is MMGenBase else ""
+		host.show_error("no node %s in %s (nodes with outputs %s: %s)" % [ node_path, path.get_file(), where, available ], EXIT_BAD_ARGS)
+	else:
+		rv.outputs = output_summary(node)
+		rv.type = node.get_type()
+		if rv.outputs.is_empty() or NO_SHADER_TYPES.has(node.get_type()) or node is MMGenMaterial:
+			host.show_error("node %s (%s) has no renderable outputs" % [ node_path, node.get_type() ], EXIT_BAD_ARGS)
+		elif port >= rv.outputs.size():
+			host.show_error("node %s has %d output(s), no port %d" % [ node_path, rv.outputs.size(), port ], EXIT_BAD_ARGS)
+		else:
+			rv.output_type = rv.outputs[port].type
+			rv.output_label = rv.outputs[port].label
+			await wait_for_buffers()
+			var texture : MMTexture = await node.render_output_to_texture(port, Vector2i(size, size))
+			var dir : String = output.get_base_dir()
+			if not DirAccess.dir_exists_absolute(dir) and DirAccess.make_dir_recursive_absolute(dir) != OK:
+				host.show_error("cannot create directory "+dir, EXIT_RENDER)
+			elif await texture.save_to_file(output) != OK:
+				host.show_error("cannot render %s:%d to %s" % [ node_path, port, output ], EXIT_RENDER)
+			else:
+				rv.file = output
+	remove_child(gen)
+	gen.free()
+	return rv

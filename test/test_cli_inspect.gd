@@ -45,6 +45,35 @@ func test_unknown_option_and_stray_argument() -> void:
 	assert_eq(parse(["--list-nodes", "stray"]).errors, ["unexpected argument stray"])
 	assert_eq(parse(["--list-nodes", "--all"]).errors.size(), 1)
 
+func test_render_output() -> void:
+	var o: Dictionary = parse(["--render-output", "/a.ptex", "--node", "graph/Bricks", "--port", "1", "--size", "256", "-o", "/out/b.png", "--json"])
+	assert_eq(o.errors, [])
+	assert_eq(o.mode, "--render-output")
+	assert_eq(o.files, ["/a.ptex"])
+	assert_eq(o.node, "graph/Bricks")
+	assert_eq(o.port, 1)
+	assert_eq(o.size, 256)
+	assert_eq(o.output, "/out/b.png")
+
+func test_render_output_defaults() -> void:
+	var o: Dictionary = parse(["--render-output", "/a.ptex", "--node", "Perlin", "--output", "/b.exr"])
+	assert_eq(o.errors, [])
+	assert_eq(o.port, 0)
+	assert_eq(o.size, CliInspect.RENDER_DEFAULT_SIZE)
+
+func test_render_output_errors() -> void:
+	assert_eq(parse(["--render-output", "/a.ptex", "-o", "/b.png"]).errors, ["no node (expected --node <name>)"])
+	assert_eq(parse(["--render-output", "/a.ptex", "--node", "n"]).errors, ["no output file (expected -o <file.png>)"])
+	assert_eq(parse(["--render-output", "--node", "n", "-o", "/b.png"]).errors.size(), 1)
+	assert_eq(parse(["--render-output", "/a.ptex", "/c.ptex", "--node", "n", "-o", "/b.png"]).errors.size(), 1)
+	assert_eq(parse(["--render-output", "/a.ptex", "--node", "n", "-o", "/b.txt"]).errors.size(), 1)
+	assert_eq(parse(["--render-output", "/a.ptex", "--node", "n", "--port", "-1", "-o", "/b.png"]).errors.size(), 1)
+	assert_eq(parse(["--render-output", "/a.ptex", "--node", "n", "--size", "8", "-o", "/b.png"]).errors.size(), 1)
+	assert_eq(parse(["--render-output", "/a.ptex", "--node"]).errors, ["--node needs a value"])
+
+func test_render_options_need_render_mode() -> void:
+	assert_eq(parse(["--validate", "/a.ptex", "--node", "n"]).errors, ["--node is only valid with --render-output"])
+
 # JSON conversion
 
 func test_to_json_safe() -> void:
