@@ -2,7 +2,7 @@
 
 Goal: make Material Maker usable by AI agents (design procedural materials from text or a
 reference photo, iterate visually, export to Unity). Work is split across sessions; see
-`agent_docs/ROADMAP.md` for phases and `agent_docs/PROGRESS.md` for current state.
+`agent_docs/ROADMAP.md` for the full plan (phases + session prompts) and `agent_docs/PROGRESS.md` for current state.
 
 ## Start of every session
 1. Read `agent_docs/PROGRESS.md` and do its "Next step".
@@ -27,6 +27,12 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 ## Running Godot / Material Maker
 - Never run Godot with `--headless` for rendering or export (it needs a real GPU context).
 - Always use `--export-material`, not `--export` (the latter is Godot's project export).
+- Always use `--target`, never `-t`: Godot swallows `-t` ("always on top"), so MM silently
+  falls back to the Godot export (a `.tres`, no `.mat`).
+- Pass absolute paths to the CLI (input `.ptex`, `-o` dir): on macOS the app changes its
+  working directory at startup, so relative paths break.
+- If the app quits instantly with no output, add `steam_appid.txt` containing `4110830`
+  next to the executable (release) or at the repo root (source).
 - Iteration outputs go in `agent_runs/` (gitignored).
 
 ## Paths on this machine
