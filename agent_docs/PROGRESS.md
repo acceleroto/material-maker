@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** Setup B (complete); next 2.1
+**Current session:** 2.1 (complete); next 3.1
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -78,6 +78,23 @@
   thread/semaphore warnings, leak messages at exit. The editor import rewrote 16 `.import` files + `project.godot`
   line order (default keys only), committed separately. macOS has no `timeout` command (use mmx's timeout).
 
+- 2.1 (agent, 2026-10-06): `parse_args.gd` (the only upstream file touched): `--size` honoured (0/absent = the
+  graph's own size; was always 2048), exit codes via `get_tree().quit(code)` (0 ok, 1 bad args, 2 load/parse,
+  3 export; highest wins), errors/warnings to stderr, `--json` one summary line (keys sorted; `mm_cli`, `ok`,
+  `exit_code`, `materials[{input,target,size,files,ok}]`, `files`, `warnings`, `errors`), similarity target
+  fallback now warns, `--strict-target` fails instead (lists available targets). Also fixed: a bad `--size`
+  returned from `_ready` without quitting (process hung); no-match target crashed on `{}.files`; output dir now
+  `make_dir_recursive`. Parser/target logic are static funcs (`parse_export_args`, `resolve_target`); written
+  files found by dir snapshot filtered to the export prefix name. GUT: `test/test_parse_args.gd`, 13 tests pass
+  (`Godot --headless --path <repo> -s addons/gut/gut_cmdln.gd -gtest=res://test/test_parse_args.gd -gexit`).
+  Real-run matrix in `agent_runs/2.1/` (default bricks byte-identical to pre-change; `--size 512` → 512²;
+  fuzzy target → 0 + warning; strict → 1; missing/garbage ptex → 2; `--size abc`/unknown option/no file → 1;
+  uncreatable or read-only out dir → 3). mmx: `mode = "source"` now default in `mmx.toml` (passes `--json
+  --strict-target`, optional `--size` on `export`/`run`), stdout → `export.log`, stderr → `export.stderr.log`,
+  result has `mm` (exit code, targets, sizes, files_written, warnings, errors); non-zero exit → named error.
+  32 mmx tests pass (fake binary covers exit codes 1/2/3 + missing summary). `mmx run` bricks: ~5.4 s;
+  `--size 256`: ~2 s. Not exercised: the additional-export (export node) branch — no example uses one.
+
 ## In progress
 - None.
 
@@ -85,7 +102,8 @@
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 2.1 per ROADMAP.md "### 2.1" (plan mode first): in `parse_args.gd`, honour `--size`, exit codes
-  (0/1/2/3 via `get_tree().quit(code)`), `--json` summary line + `--strict-target`, errors to stderr; GUT tests
-  under `test/`; implement mmx `mode = "source"` (config already in `agent_tools/mmx.toml` `[source]`) using the
-  exit codes/JSON. The source invocation above is confirmed working.
+- Session 3.1 per ROADMAP.md "### 3.1" (plan mode first): add engine-backed CLI modes `--list-nodes --json`,
+  `--describe-node <type> --json`, `--validate <ptex> --json` (in `parse_args.gd` or a script it delegates to;
+  reuse its `--json`/exit-code/stderr conventions and add GUT tests next to `test/test_parse_args.gd`);
+  regenerate `agent_tools/catalog.json` + `agent_docs/NODES.md` from them; make `mmx validate` call the engine
+  version (keep the Python one as a fast pre-check). mmx already runs from source (`mode = "source"`).

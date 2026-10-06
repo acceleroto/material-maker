@@ -45,8 +45,11 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 - Repo:              `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`
 - Godot 4.7.2:       `/Applications/Godot.app/Contents/MacOS/Godot`
 - Material Maker:    `/Applications/Material Maker.app/Contents/MacOS/Material Maker`
-- From source (since Setup B): `<Godot> --path <Repo> --export-material --target "Unity/URP" -o <abs dir> <abs .ptex>`
-  (works from Bash, ~11 s, output identical to the release). macOS has no `timeout` command.
+- From source (since Setup B; mmx default `mode = "source"` since 2.1):
+  `<Godot> --path <Repo> --export-material --target "Unity/URP" -o <abs dir> <abs .ptex>`
+  (works from Bash, ~5 s, output identical to the release). Since 2.1 also `--size N`, `--json`
+  (one summary line), `--strict-target`; exit codes 0 ok / 1 bad args / 2 load / 3 export; errors on
+  stderr (details in `agent_tools/README.md`). macOS has no `timeout` command.
 - MM release data:   `/Applications/Material Maker.app/Contents/MacOS/` (library, nodes, export, ...)
 - Unity project:     `/Volumes/External1/Users/bryan/Documents/MM-Agent-Test`
 - OS: macOS Tahoe 26.3.1(a). Note `$HOME` is `/Volumes/External1/Users/bryan`.

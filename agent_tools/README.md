@@ -76,10 +76,10 @@ ports/params by the node's `generic_size`, defaulting to the `.mmg`'s own `gener
 
 ## Export, sheet, run (Session 1.2)
 
-**Config** `agent_tools/mmx.toml` (override: `$MMX_CONFIG` or `--config`): `mode` (`release` = the
-installed app; `source` = Godot + repo, Phase 2, not implemented), default `target`, `timeout`
-(default 180 s; an export takes ~5 s), `[release] binary` and `data_dir` (its `nodes/` is used to
-predict outputs).
+**Config** `agent_tools/mmx.toml` (override: `$MMX_CONFIG` or `--config`): `mode` (`source` = Godot +
+this repo, the default since Session 2.1; `release` = the installed app), default `target`, `timeout`
+(default 180 s; an export takes ~2–11 s), `[source] godot` and `project`, `[release] binary` and
+`data_dir` (its `nodes/` is used to predict outputs).
 
 **export**: `validate` first (errors → exit 1, nothing runs), then plans the expected files from
 the Material node's export template for the target (mirrors `MMGenMaterial.export_material`:
@@ -87,11 +87,36 @@ the Material node's export template for the target (mirrors `MMGenMaterial.expor
 target fails with close matches). It `mkdir -p`s the out dir, **deletes previous outputs of that
 prefix** (MM silently skips existing `.mat`/`.meta` in CLI mode, and old maps would hide a failure;
 `--keep-meta` keeps `.meta` files to preserve Unity GUIDs), runs the binary with absolute paths,
-`--export-material --target`, stdout+stderr → `<out>/export.log`, and kills it after the timeout.
-Success = every expected file exists and is newer than the start (MM's exit code is always 0).
-Prints and writes `<out>/mmx_result.json`: `ok`, `stage` (validate/plan/export/done), `error`,
-`files` [{file, bytes}], `missing`, `log_errors` (known harmless shutdown noise filtered),
-`seconds`, `hints`. Exit 0 ok, 1 validation/plan, 2 export failed.
+`--export-material --target`, stdout → `<out>/export.log`, stderr → `<out>/export.stderr.log`, and kills
+it after the timeout. `--size N` (source mode only) renders N×N maps, e.g. 512 for fast drafts; default
+is the graph's own size (Material node `size`, usually 2048).
+Success = every expected file exists and is newer than the start; in source mode also MM's exit code
+is 0 and its `--json` summary line is present (the release app always exits 0 and has no summary).
+Prints and writes `<out>/mmx_result.json`: `ok`, `stage` (validate/plan/export/done), `mode`, `error`,
+`files` [{file, bytes}], `missing`, `mm` (source mode: MM's `exit_code`, `targets`, `sizes`,
+`files_written`, `warnings`, `errors`), `log_errors` (known harmless Steam/shutdown noise filtered),
+`seconds`, `hints`. Exit 0 ok, 1 validation/plan, 2 export failed. A non-zero MM exit becomes
+`error: "<bad arguments|load/parse failure|export failure>: <MM's errors>"`.
+
+**Material Maker CLI (source mode, `parse_args.gd`, Session 2.1)**:
+`<godot> --path <repo> --export-material [--target T] [-o DIR] [--output-file PATTERN] [--size N]
+[--json] [--strict-target] <file.ptex|glob|website:ids>...`
+- `--size N`: texture size in pixels; `0`/absent = the graph's own size (before 2.1 it was ignored
+  and always 2048).
+- Exit codes: `0` success, `1` bad arguments (missing value, bad `--size`, unknown option, no input,
+  unknown target), `2` load/parse failure (missing/invalid file, no glob match, no Material node),
+  `3` export failure (output dir can't be created, an export wrote no files). Several failures → the
+  highest code.
+- Errors and warnings go to **stderr** (`ERROR: ...` / `WARNING: ...`).
+- Unknown `--target`: MM falls back to the most similar profile and now warns
+  (`target "X" not found, using "Y"`); with `--strict-target` it fails (exit 1, lists the available
+  targets). mmx always passes `--strict-target` (and checks the target before launching anyway).
+- `--json`: last stdout line is one JSON object (keys sorted): `mm_cli` (1), `ok`, `exit_code`,
+  `target_requested`, `size_requested`, `output_dir`, `materials` [{input, target, size, files, ok}],
+  `files` (all written paths), `warnings`, `errors`. "Written" = files named after the export prefix
+  that are new or changed during the export (detected by directory snapshot, 1 s mtime resolution).
+- Tests (GUT): `<godot> --headless --path <repo> -s addons/gut/gut_cmdln.gd -gtest=res://test/test_parse_args.gd -gexit`
+  (parsing only, so `--headless` is fine; GUT prints one harmless `SCRIPT ERROR` from its own loader).
 
 **sheet**: one PNG of everything in an export dir: `lit` (crude Lambert, light from top-left,
 from albedo+normal+AO), `lit tiled 2x2` (seams/repetition), then albedo, normal, height,
@@ -117,7 +142,8 @@ direct shell launch all finished in ~5–7 s (6/6). So call `mmx run` from Bash 
 Fixed in Session 1.3: the lit preview used to put the light at the bottom-left (a y-sign slip), so
 raised features looked sunken on sheets made before then. Limitations: the lit preview is a flat-plane Lambert approximation (no specular, no parallax) and
 assumes OpenGL (+Y) normals; additional `material_export` nodes' files aren't predicted; only the
-first material node is checked.
+first material node is checked. The `parse_args.gd` additional-export branch (export nodes) wasn't
+exercised in Session 2.1 (no example uses one).
 
 ## Other
 - `proto_0.3/`: throwaway Session 0.3 helpers (export.sh, g.py, sheet.py), superseded by
