@@ -12,7 +12,7 @@ const ENVIRONMENT_MANAGER_SCENE : String = "res://material_maker/tools/environme
 # field of view: the editor's camera position and angle, but zoomed so the object fills the view
 const MESHES : Dictionary = {
 	sphere = { object="Sphere", uv_scale=Vector2(4, 2), fov=30.0 },
-	plane = { object="Plane", uv_scale=Vector2(2, 2), fov=34.0 },
+	plane = { object="Plane", uv_scale=Vector2(2, 2), fov=37.0 },
 	cube = { object="Cube", uv_scale=Vector2(3, 2), fov=31.0 }
 }
 

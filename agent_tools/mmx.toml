@@ -5,6 +5,10 @@ mode = "source"         # "source": Godot + this repo (parse_args.gd: --json, ex
                         # "release": the installed app (no --size, no JSON, always exits 0).
 target = "Unity/URP"    # default --target
 timeout = 180           # seconds before a hung export is killed (a normal export takes ~5-11 s)
+preview_3d = true       # `mmx run` also renders iter_NNN/preview_3d.png (engine --render-preview; ~3 s; source mode)
+preview_mesh = "sphere+plane"   # mmx preview / run defaults: keep them fixed so iterations stay comparable
+preview_env = "Studio"
+preview_size = 512              # pixels per view
 validate_engine = true  # `mmx validate` also runs the engine's --validate (shader compile; ~2 s; source mode)
 
 [release]

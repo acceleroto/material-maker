@@ -138,7 +138,7 @@
 
 ## In progress
 - 4.2: engine `--render-preview` works (cli_preview.gd, editor preview scene + EnvironmentManager + Material preview shader;
-  deterministic, ~2.6 s). Next: `mmx preview`, sheet top row, `mmx run` integration, docs.
+  deterministic, ~2.6 s). `mmx preview`, sheet top row and `mmx run` integration done (57 mmx tests). Next: docs.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).

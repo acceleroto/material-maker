@@ -9,6 +9,8 @@ Subcommands:
   node      Print one catalog entry as JSON.
   export    Validate, then export a .ptex with the Material Maker binary (config: mmx.toml);
             JSON summary of files written, exit 0 (ok) / 1 (validation/plan) / 2 (export failed).
+  preview   Lit 3D preview PNG of a .ptex (engine --render-preview: the editor's 3D preview scene,
+            sphere + plane, Studio environment, fixed camera); JSON, exit 0/1.
   node-preview  Render one output of one node to a PNG (engine --render-output, source mode),
             to debug a graph stage by stage; JSON, exit 0/1.
   sheet     Labeled contact-sheet PNG of an export dir (needs Pillow, agent_tools/.venv).
@@ -1219,11 +1221,16 @@ RUNS_DIR = REPO / "agent_runs"
 VENV_PYTHON = REPO / "agent_tools" / ".venv" / "bin" / "python"
 RESULT_NAME = "mmx_result.json"   # written by export/run; polled by `mmx wait`
 STATUS_NAME = "mmx_status.json"   # written by run while in progress
+PREVIEW_NAME = "preview_3d.png"   # 3D preview written by run; top row of the sheet
 
 DEFAULT_CONFIG = {
     "mode": "release",
     "target": "Unity/URP",
     "timeout": 180,
+    "preview_3d": True,          # mmx run renders iter_NNN/preview_3d.png (source mode)
+    "preview_mesh": "sphere+plane",
+    "preview_env": "Studio",
+    "preview_size": 512,
     "release": {
         "binary": "/Applications/Material Maker.app/Contents/MacOS/Material Maker",
         "data_dir": "/Applications/Material Maker.app/Contents/MacOS",
@@ -1560,24 +1567,21 @@ def node_preview_path(ptex, node, port=0, runs_dir=None):
     return Path(runs_dir or RUNS_DIR) / "node_preview" / Path(ptex).stem / ("%s_p%d.png" % (node.replace("/", "__"), port))
 
 
-def node_preview(ptex, node, port=0, size=512, out=None, cfg=None, timeout=None):
-    """Render one output of one node to a PNG with the engine's --render-output.
-    Returns {"ok", "file", "node", "port", "size", "output_type", "outputs", "seconds", "errors", "warnings"}."""
-    out = Path(out).resolve() if out else node_preview_path(ptex, node, port)
+def _engine_render(mode_args, out, cfg=None, timeout=None, keys=()):
+    """Run an engine render mode that writes `out` (--render-output / --render-preview).
+    Returns {"ok", "file", "seconds", "errors", "warnings", <keys copied from the summary>}."""
+    out = Path(out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         out.unlink()  # never report a stale image
-    args = ["--render-output", str(Path(ptex).resolve()), "--node", node, "--port", str(port),
-            "--size", str(size), "-o", str(out)]
-    summary, info = run_engine(args, cfg, timeout)
-    rv = {"ok": False, "file": None, "node": node, "port": port, "size": size, "seconds": info.get("seconds"),
-          "errors": [], "warnings": []}
+    summary, info = run_engine(list(mode_args) + ["-o", str(out)], cfg, timeout)
+    rv = {"ok": False, "file": None, "seconds": info.get("seconds"), "errors": [], "warnings": []}
     if summary is None:
         rv["errors"].append(info["error"])
         return rv
     rv["errors"] = summary.get("errors") or []
     rv["warnings"] = summary.get("warnings") or []
-    for k in ("type", "output_type", "output_label", "outputs"):
+    for k in keys:
         if k in summary:
             rv[k] = summary[k]
     rv["ok"] = bool(summary.get("ok")) and out.is_file()
@@ -1586,6 +1590,37 @@ def node_preview(ptex, node, port=0, size=512, out=None, cfg=None, timeout=None)
     if rv["ok"]:
         rv["file"] = str(out)
     return rv
+
+
+def node_preview(ptex, node, port=0, size=512, out=None, cfg=None, timeout=None):
+    """Render one output of one node to a PNG with the engine's --render-output.
+    Returns {"ok", "file", "node", "port", "size", "output_type", "outputs", "seconds", "errors", "warnings"}."""
+    out = out or node_preview_path(ptex, node, port)
+    args = ["--render-output", str(Path(ptex).resolve()), "--node", node, "--port", str(port), "--size", str(size)]
+    rv = {"node": node, "port": port, "size": size}
+    rv.update(_engine_render(args, out, cfg, timeout, ("type", "output_type", "output_label", "outputs")))
+    return rv
+
+
+def render_preview(ptex, out=None, mesh=None, env=None, size=None, cfg=None, timeout=None):
+    """Lit 3D preview of a .ptex with the engine's --render-preview (defaults from mmx.toml:
+    sphere+plane, Studio, 512 px per view). Returns {"ok", "file", "meshes", "env", "size", "width",
+    "height", "image_size", "seconds", "errors", "warnings"}."""
+    cfg = cfg or load_config()
+    mesh = mesh or cfg["preview_mesh"]
+    env = env or cfg["preview_env"]
+    size = int(size or cfg["preview_size"])
+    out = out or (RUNS_DIR / "preview" / (Path(ptex).stem + ".png"))
+    args = ["--render-preview", str(Path(ptex).resolve()), "--mesh", mesh, "--env", str(env), "--size", str(size)]
+    rv = {"meshes": mesh.split("+"), "env": env, "size": size}
+    rv.update(_engine_render(args, out, cfg, timeout, ("meshes", "env", "width", "height", "image_size")))
+    return rv
+
+
+def cmd_preview(args):
+    result = render_preview(args.ptex, args.out, args.mesh, args.env, args.size, load_config(args.config), args.timeout)
+    print(json.dumps(result, indent=1, ensure_ascii=False))
+    return 0 if result["ok"] else 1
 
 
 def cmd_node_preview(args):
@@ -1614,7 +1649,7 @@ def classify_maps(directory):
     """{kind: Path} for the PNGs in an export dir (sheet.png and unknowns under their own suffix)."""
     maps = {}
     for p in sorted(Path(directory).glob("*.png")):
-        if p.name == "sheet.png":
+        if p.name in ("sheet.png", PREVIEW_NAME):
             continue
         stem = p.stem.lower()
         for suf, kind in MAP_SUFFIXES:
@@ -1681,10 +1716,20 @@ def _font(size):
         return ImageFont.load_default()
 
 
-def make_sheet(directory, out=None, tile=384, cols=4, title=None):
-    """Write a labeled contact sheet of every map in `directory`. Returns {"sheet", "tiles"}."""
+def find_preview(directory):
+    """The 3D preview that goes with an export dir: <dir>/preview_3d.png or <dir>/../preview_3d.png."""
+    for p in (Path(directory) / PREVIEW_NAME, Path(directory).parent / PREVIEW_NAME):
+        if p.is_file():
+            return p
+    return None
+
+
+def make_sheet(directory, out=None, tile=384, cols=4, title=None, preview=None, preview_label=None):
+    """Write a labeled contact sheet of every map in `directory`, with the 3D preview (`preview`, or
+    found by find_preview) as a full-width top row. Returns {"sheet", "tiles", "sources", "preview"}."""
     from PIL import Image, ImageDraw
     directory = Path(directory)
+    preview = Path(preview) if preview else find_preview(directory)
     maps = classify_maps(directory)
     if not maps:
         raise SystemExit("mmx sheet: no PNG maps in %s" % directory)
@@ -1703,13 +1748,22 @@ def make_sheet(directory, out=None, tile=384, cols=4, title=None):
 
     head, lab = 30, 22
     rows = (len(order) + cols - 1) // cols
-    sheet = Image.new("RGB", (cols * tile, head + rows * (tile + lab)), (28, 28, 28))
+    top = None
+    if preview is not None:
+        with Image.open(preview) as im:
+            top = im.convert("RGB")
+        top = top.resize((cols * tile, round(top.height * cols * tile / top.width)))
+    top_h = top.height + lab if top is not None else 0
+    sheet = Image.new("RGB", (cols * tile, head + top_h + rows * (tile + lab)), (28, 28, 28))
     dr = ImageDraw.Draw(sheet)
     dr.text((6, 6), title or str(directory), fill=(255, 255, 255), font=_font(16))
+    if top is not None:
+        sheet.paste(top, (0, head + lab))
+        dr.text((6, head + 4), preview_label or "3D preview (MM renderer)", fill=(255, 255, 255), font=_font(14))
     info = []
     for i, k in enumerate(order):
         im = tiles[k]
-        x, y = (i % cols) * tile, head + (i // cols) * (tile + lab)
+        x, y = (i % cols) * tile, head + top_h + (i // cols) * (tile + lab)
         sheet.paste(im.convert("RGB").resize((tile, tile)), (x, y + lab))
         text = k
         if im.mode == "L":  # numeric range helps spot flat/clipped maps
@@ -1720,11 +1774,12 @@ def make_sheet(directory, out=None, tile=384, cols=4, title=None):
         info.append(text)
     out = Path(out) if out else directory / "sheet.png"
     sheet.save(out)
-    return {"sheet": str(out), "tiles": info, "sources": {k: p.name for k, p in maps.items()}}
+    return {"sheet": str(out), "tiles": info, "sources": {k: p.name for k, p in maps.items()},
+            "preview": str(preview) if preview is not None else None}
 
 
 def cmd_sheet(args):
-    res = make_sheet(args.dir, args.out)
+    res = make_sheet(args.dir, args.out, preview=args.preview)
     print(json.dumps(res, indent=1))
     return 0
 
@@ -1752,7 +1807,8 @@ def next_iter_dir(run_name, runs_dir=None):
 RUN_NAME_RE = re.compile(r"[\w.-]+(/[\w.-]+)*")
 
 
-def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=None, note=None, size=None):
+def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=None, note=None, size=None,
+                  preview=None):
     import shutil
     import time
     if not RUN_NAME_RE.fullmatch(run_name) or any(c in (".", "..") for c in run_name.split("/")):
@@ -1767,9 +1823,20 @@ def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=
         (d / "note.md").write_text(note + "\n")
     res = run_export(copy, d / "out", target, cfg, timeout, size=size)
     res["iter_dir"] = str(d)
+    cfg = cfg or load_config()
+    preview = cfg.get("preview_3d", True) if preview is None else preview
+    label = None
+    if res["ok"] and preview and cfg["mode"] == "source":
+        p = render_preview(copy, d / PREVIEW_NAME, cfg=cfg, timeout=timeout)
+        res["preview"] = {k: p.get(k) for k in ("ok", "file", "meshes", "env", "seconds", "errors")}
+        if p["ok"]:
+            label = "3D preview: %s, %s environment (the image to judge)" % (" + ".join(p.get("meshes") or []), p.get("env"))
+        else:  # the maps are still useful: keep the iteration, flag the missing preview
+            res.setdefault("warnings", []).append("3D preview failed: %s" % "; ".join(p["errors"]))
     if res["ok"]:
         try:
-            res["sheet"] = make_sheet(d / "out", d / "sheet.png", title="%s / %s  (%s)" % (run_name, d.name, ptex.name))["sheet"]
+            res["sheet"] = make_sheet(d / "out", d / "sheet.png", title="%s / %s  (%s)" % (run_name, d.name, ptex.name),
+                                      preview=(d / PREVIEW_NAME) if label else None, preview_label=label)["sheet"]
         except Exception as e:  # keep the export result even if the sheet fails
             res["ok"] = False
             res["error"] = "sheet failed: %s" % e
@@ -1780,7 +1847,7 @@ def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=
 
 def cmd_run(args):
     res = run_iteration(args.ptex, args.run_name, args.target, load_config(args.config), args.timeout,
-                        note=args.note, size=args.size)
+                        note=args.note, size=args.size, preview=False if args.no_preview else None)
     print(json.dumps(res, indent=1, ensure_ascii=False))
     return 0 if res["ok"] else 2
 
@@ -1821,7 +1888,7 @@ def cmd_wait(args):
 def _ensure_pillow(cmd):
     """sheet/run need Pillow: re-exec under agent_tools/.venv if the current python lacks it."""
     import os
-    if cmd not in ("sheet", "run"):
+    if cmd not in ("sheet", "run"):  # preview/node-preview need no Pillow
         return
     try:
         import PIL  # noqa: F401
@@ -1864,6 +1931,15 @@ def main(argv=None):
     p.add_argument("--no-validate", action="store_true", help="skip mmx validate")
     export_opts(p)
     p.set_defaults(fn=cmd_export)
+    p = sub.add_parser("preview", help="lit 3D preview PNG of a .ptex (engine, source mode); JSON, exit 0/1")
+    p.add_argument("ptex")
+    p.add_argument("--mesh", help="sphere, plane, cube or several joined with + (default from mmx.toml: sphere+plane)")
+    p.add_argument("--env", help="environment name or index (default from mmx.toml: Studio)")
+    p.add_argument("--size", type=int, help="pixels per view (default from mmx.toml: 512)")
+    p.add_argument("--out", help="output PNG (default agent_runs/preview/<ptex stem>.png)")
+    p.add_argument("--timeout", type=float, help="seconds before Godot is killed (default from mmx.toml)")
+    p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
+    p.set_defaults(fn=cmd_preview)
     p = sub.add_parser("node-preview", help="render one output of one node to a PNG (engine, source mode); JSON, exit 0/1")
     p.add_argument("ptex")
     p.add_argument("--node", required=True, help="node name; a/b for a node inside sub-graph a")
@@ -1876,11 +1952,13 @@ def main(argv=None):
     p = sub.add_parser("sheet", help="labeled contact-sheet PNG of an export dir")
     p.add_argument("dir")
     p.add_argument("--out", help="output PNG (default <dir>/sheet.png)")
+    p.add_argument("--preview", help="3D preview PNG for the top row (default <dir>/preview_3d.png or <dir>/../preview_3d.png)")
     p.set_defaults(fn=cmd_sheet)
     p = sub.add_parser("run", help="one iteration: agent_runs/<run>/iter_NNN/ with ptex copy, out/, sheet.png")
     p.add_argument("ptex")
     p.add_argument("--run-name", required=True, help="agent_runs/<name>/; '/' nests, e.g. 1.3/desert")
     p.add_argument("--note", help="text saved as note.md in the iteration dir (what changed and why)")
+    p.add_argument("--no-preview", action="store_true", help="skip the 3D preview (iter_NNN/preview_3d.png)")
     export_opts(p)
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("wait", help="wait for an export/run started elsewhere (Terminal panel); print its result")

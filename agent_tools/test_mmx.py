@@ -343,6 +343,28 @@ class TestSheet(unittest.TestCase):
             self.assertEqual(labels, ["lit", "lit", "albedo", "normal", "roughness", "metallic"])
             self.assertIn("min 0.75", r["tiles"][4])  # roughness = 1 - smoothness(64/255)
             self.assertEqual(mmx.make_sheet(t)["sources"].keys(), r["sources"].keys())  # ignores sheet.png
+            self.assertIsNone(r["preview"])
+
+    def test_sheet_preview_top_row(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "out"
+            out.mkdir()
+            Image.new("RGB", (64, 64), (200, 50, 50)).save(out / "m_albedo.png")
+            plain = Image.open(mmx.make_sheet(out, Path(t) / "plain.png", tile=64)["sheet"])
+            Image.new("RGB", (200, 100), (0, 255, 0)).save(Path(t) / mmx.PREVIEW_NAME)  # iter dir = out/..
+            r = mmx.make_sheet(out, Path(t) / "with.png", tile=64)
+            self.assertEqual(r["preview"], str(Path(t) / mmx.PREVIEW_NAME))
+            self.assertNotIn("preview", " ".join(r["sources"].values()))
+            sheet = Image.open(r["sheet"])
+            self.assertEqual(sheet.width, plain.width)
+            self.assertEqual(sheet.height, plain.height + 128 + 22)  # 2:1 preview at sheet width 256, + label
+            self.assertEqual(sheet.getpixel((128, 30 + 22 + 64)), (0, 255, 0))  # top row is the preview
+            # a preview inside the export dir is not mistaken for a map
+            Image.new("RGB", (200, 100), (0, 0, 255)).save(out / mmx.PREVIEW_NAME)
+            r = mmx.make_sheet(out, Path(t) / "inside.png", tile=64)
+            self.assertEqual(r["preview"], str(out / mmx.PREVIEW_NAME))
+            self.assertEqual(list(r["sources"]), ["albedo"])
 
 
 # A stand-in for Godot running cli_inspect.gd: prints the canned summary in $FAKE_ENGINE_SUMMARY
@@ -494,6 +516,93 @@ class TestNodePreview(unittest.TestCase):
         self.assertIn("no JSON summary", r["errors"][0])
 
 
+class TestRenderPreview(unittest.TestCase):
+    setUp = TestEngineValidate.setUp
+    setenv = TestEngineValidate.setenv
+
+    def test_argv_and_defaults(self):
+        out = Path(self.tmp.name) / "p.png"
+        seen = []
+        orig = mmx.run_engine
+
+        def fake_run(args, cfg=None, timeout=None):
+            seen.append(args)
+            out.write_bytes(b"png")
+            return {"mm_cli": 1, "ok": True, "errors": [], "warnings": [], "env": "Studio", "width": 1024,
+                    "height": 512, "meshes": ["sphere", "plane"]}, {"seconds": 1.0, "exit_code": 0}
+        mmx.run_engine = fake_run
+        self.addCleanup(setattr, mmx, "run_engine", orig)
+        r = mmx.render_preview(BRICKS, out, cfg=self.cfg)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(seen[0], ["--render-preview", str(BRICKS.resolve()), "--mesh", "sphere+plane", "--env", "Studio",
+                                   "--size", "512", "-o", str(out.resolve())])
+        self.assertEqual((r["width"], r["height"], r["env"]), (1024, 512, "Studio"))
+        mmx.render_preview(BRICKS, out, mesh="cube", env="1", size=64, cfg=self.cfg)
+        self.assertEqual(seen[1][3:8], ["cube", "--env", "1", "--size", "64"])
+
+    def test_engine_error(self):
+        self.setenv(FAKE_ENGINE_SUMMARY={"mm_cli": 1, "ok": False, "errors": ["unknown --env x"], "warnings": []},
+                    FAKE_ENGINE_EXIT="1")
+        r = mmx.render_preview(BRICKS, Path(self.tmp.name) / "p.png", env="x", cfg=self.cfg)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["errors"], ["unknown --env x"])
+
+
+class TestRunWithPreview(unittest.TestCase):
+    """run_iteration with export and preview stubbed: the preview lands on top of the sheet, a failed
+    preview only warns."""
+    def setUp(self):
+        from PIL import Image
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = mmx.load_config()
+        self.cfg["mode"] = "source"
+        self.calls = []
+
+        def fake_export(ptex, out_dir, *a, **kw):
+            Path(out_dir).mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (32, 32), (200, 50, 50)).save(Path(out_dir) / "x_albedo.png")
+            return {"ok": True, "files": []}
+
+        def fake_preview(ptex, out, **kw):
+            self.calls.append(Path(out))
+            if self.preview_ok:
+                Image.new("RGB", (64, 32), (0, 255, 0)).save(out)
+                return {"ok": True, "file": str(out), "meshes": ["sphere", "plane"], "env": "Studio", "errors": []}
+            return {"ok": False, "file": None, "errors": ["boom"]}
+        for name, f in (("run_export", fake_export), ("render_preview", fake_preview)):
+            self.addCleanup(setattr, mmx, name, getattr(mmx, name))
+            setattr(mmx, name, f)
+
+    def run_it(self, **kw):
+        return mmx.run_iteration(BRICKS, "r", cfg=self.cfg, runs_dir=self.tmp.name, **kw)
+
+    def test_preview_on_top(self):
+        self.preview_ok = True
+        r = self.run_it()
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.calls, [Path(r["iter_dir"]) / mmx.PREVIEW_NAME])
+        self.assertTrue(r["preview"]["ok"])
+        from PIL import Image
+        self.assertEqual(Image.open(r["sheet"]).getpixel((100, 30 + 22 + 50)), (0, 255, 0))
+
+    def test_preview_failure_warns(self):
+        self.preview_ok = False
+        r = self.run_it()
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["warnings"], ["3D preview failed: boom"])
+        self.assertTrue(Path(r["sheet"]).exists())
+
+    def test_disabled(self):
+        self.preview_ok = True
+        self.run_it(preview=False)
+        self.cfg["preview_3d"] = False
+        self.run_it()
+        self.cfg["preview_3d"], self.cfg["mode"] = True, "release"
+        self.run_it()
+        self.assertEqual(self.calls, [])
+
+
 class TestEngineCatalogMerge(unittest.TestCase):
     def test_merge(self):
         static = mmx.Catalog({
@@ -612,6 +721,18 @@ class TestRealEngine(Base):
             r = mmx.node_preview(BRICKS, "Perlin", 3, 128, Path(t) / "p.png")
             self.assertFalse(r["ok"])
             self.assertIn("no port 3", r["errors"][0])
+
+    def test_render_preview(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as t:
+            r = mmx.render_preview(BRICKS, Path(t) / "p.png", mesh="sphere", size=128)
+            self.assertTrue(r["ok"], r)
+            im = Image.open(r["file"]).convert("RGB")
+            self.assertEqual(im.size, (128, 128))
+            self.assertNotEqual(im.getpixel((64, 64)), im.getpixel((2, 2)))  # something in front of the background
+            r = mmx.render_preview(BRICKS, Path(t) / "q.png", env="nope", size=64)
+            self.assertFalse(r["ok"])
+            self.assertIn("unknown --env nope", r["errors"][0])
 
     def test_mmx_validate_cli(self):
         rc, r = run_validate(BRICKS)
