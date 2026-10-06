@@ -47,6 +47,12 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 - Unity project:     `/Volumes/External1/Users/bryan/Documents/MM-Agent-Test`
 - OS: macOS Tahoe 26.3.1(a). Note `$HOME` is `/Volumes/External1/Users/bryan`.
 
+## Agent tools
+- Node reference: `agent_docs/NODES.md`; full data `agent_tools/catalog.json`; one type:
+  `python3 agent_tools/mmx.py node <type>`.
+- Run `python3 agent_tools/mmx.py validate <file.ptex>` after every `.ptex` edit, before exporting.
+  See `agent_tools/README.md` for error codes and limitations.
+
 ## Code style
 - GDScript: follow upstream style and the Godot style guide; explicit static typing
   (`var x: int`, typed function args and return types).

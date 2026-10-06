@@ -123,3 +123,8 @@ Other observations:
 4. **`mmx run` + `mmx sheet`** (Phase 1.2): my `export.sh` + `sheet.py` + `g.py` prototypes in
    `agent_tools/proto_0.3/` are a working sketch of these; they cut iteration overhead a lot.
 5. A small edit API (set/add/wire by name) rather than hand-editing JSON; `g.py` was ~20 lines and enough.
+
+## Resolved in Session 1.1
+- `Bricks.repeat`/`rows`/`columns` edits had no effect because the `graph` subgraph's `gen_parameters`
+  remote has a `config_control` (param0, "Pattern") whose configurations set those values on load.
+  Change `graph.param0` instead. `mmx validate` reports this as `overridden_parameter`.

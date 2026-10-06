@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 1.1 (in progress)
+**Current session:** 1.1 (complete)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -33,20 +33,30 @@
   `agent_tools/proto_0.3/`.
 - 0.4 (user, 2026-10-05): decision: the pipeline works and the agent made reasonable progress
   ("not amazing, but a good start") → continue to Phase 1 (normal path).
+- 1.1 (agent, 2026-10-05): `agent_tools/mmx.py` (stdlib only) with `catalog` (→ `agent_tools/catalog.json`,
+  411 types incl. built-ins, port-type table; `agent_docs/NODES.md`, 442 lines, ~65 curated types + .ptex
+  primer incl. blend foreground/background/mask semantics), `validate <ptex>` (JSON ok/errors/warnings,
+  exit 0/1; codes table in `agent_tools/README.md`), `node <type>`. Subgraph `paramN` resolve to real labels
+  (`normal_map.param1` = Strength). Tests `python3 -m unittest agent_tools/test_mmx.py -v`: all 43
+  `material_maker/examples/*.ptex` pass; broken copies (bad type / bad port / bad params) fail correctly.
+  Findings: old examples carry stale params MM ignores (→ `ignored_parameter` warning via `STALE_PARAMS`);
+  `.mmg` files can set a default `generic_size` (mwf_mix = 2); out-of-slider values are common (warning).
+  **Phase-0 mystery solved:** `Bricks.repeat/rows/columns` in `bricks.ptex` are driven by the subgraph's
+  `gen_parameters.param0` config_control (Pattern), which overwrites them on load; `validate` now warns
+  `overridden_parameter` for this.
 
 ## In progress
-- 1.1: `mmx catalog` + `mmx validate` + `mmx node` done; tests pass (`agent_tools/test_mmx.py`, 43 examples +
-  broken copies). Remaining: `agent_tools/README.md` (usage + limitations), final PROGRESS update.
+- None.
 
 ## Blockers
-- None hard. Open question: why `Bricks.repeat`/`rows`/`columns` edits are ignored on export
-  (check in GUI when convenient). Exports must run via `run_in_terminal`.
+- None. Exports must run via `run_in_terminal` (Bash-launched exports hang).
 
 ## Next step
-- Session 1.1 per ROADMAP.md "### 1.1" (use plan mode first; user approves): build
-  `agent_tools/mmx.py` with `mmx catalog` (→ `agent_tools/catalog.json` + `agent_docs/NODES.md`,
-  <600 lines) and `mmx validate <ptex>` (JSON `{"ok","errors"}`, exit 0/1). Test against all
-  release examples + 3 broken copies. Lessons from 0.3 to fold in: include port shortdesc/longdesc
-  (esp. which `blend` input is the top layer), and resolve subgraph nodes' `paramN` (e.g.
-  `normal_map.param1` = amount) to real labels. Prototype helpers in `agent_tools/proto_0.3/`.
-  Then update PROGRESS.md (next: 1.2).
+- Session 1.2 per ROADMAP.md "### 1.2": extend `agent_tools/mmx.py` with `mmx export <ptex> --target
+  "Unity/URP" --out <dir>` (run `validate` first and refuse on errors; absolute paths; `mkdir -p` the out
+  dir; timeout; log stdout/stderr; detect failure by expected output files; JSON summary), `mmx sheet <dir>`
+  (labeled contact sheet; reuse ideas from `agent_tools/proto_0.3/sheet.py`, but Pillow only, no numpy),
+  `mmx run <ptex> --run-name X` (→ `agent_runs/X/iter_NNN/`), and `agent_tools/mmx.toml` for binary paths
+  (Python 3.11+ `tomllib`). Remember: the MM binary hangs when launched from the Bash tool; design
+  `export` so it can be started via `run_in_terminal` (e.g. write a DONE marker / JSON result file that
+  Bash can poll, as `proto_0.3/export.sh` does). Add short tests. Update PROGRESS.md (next: 1.3).

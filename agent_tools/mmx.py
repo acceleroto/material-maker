@@ -869,13 +869,13 @@ class Validator:
             self.err("bad_generic_size", path, name, "'generic_size' must be an integer >= 1.")
         d = self.catalog.node_defs(node, siblings)
         if d is None:
-            if t.startswith("website:"):
+            if isinstance(t, str) and t.startswith("website:"):
                 self.warn("unresolved_type", path, name, "Type %r is downloaded from the MM website at load time; "
                           "not checked offline." % t)
             else:
-                close = difflib.get_close_matches(t, [k for k, e in self.catalog.entries.items()
+                close = difflib.get_close_matches(str(t), [k for k, e in self.catalog.entries.items()
                                                       if e["kind"] != "builtin" or e.get("parameters")], n=5, cutoff=0.6)
-                self.err("unknown_type", path, name, "Unknown node type %r." % t,
+                self.err("unknown_type", path, name, "Unknown node type %r." % (t,),
                          ("Did you mean: %s? " % ", ".join(close) if close else "") +
                          "See agent_docs/NODES.md or agent_tools/catalog.json for valid types.")
             return None
