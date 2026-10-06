@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 4.1 (complete); next 4.2
+**Current session:** 4.2 (in progress)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -137,7 +137,8 @@
   Docs: `agent_tools/README.md`, CLAUDE.md, SKILL.md + AGENTS.md (debug step now uses node-preview first).
 
 ## In progress
-- None.
+- 4.2: engine `--render-preview` works (cli_preview.gd, editor preview scene + EnvironmentManager + Material preview shader;
+  deterministic, ~2.6 s). Next: `mmx preview`, sheet top row, `mmx run` integration, docs.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).

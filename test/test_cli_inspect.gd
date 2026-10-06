@@ -73,6 +73,31 @@ func test_render_output_errors() -> void:
 
 func test_render_options_need_render_mode() -> void:
 	assert_eq(parse(["--validate", "/a.ptex", "--node", "n"]).errors, ["--node is only valid with --render-output"])
+	assert_eq(parse(["--render-output", "/a.ptex", "--node", "n", "--mesh", "cube", "-o", "/b.png"]).errors,
+			["--mesh is only valid with --render-preview"])
+	assert_eq(parse(["--render-preview", "/a.ptex", "--port", "1", "-o", "/b.png"]).errors,
+			["--port is only valid with --render-output"])
+
+func test_render_preview_defaults() -> void:
+	var o: Dictionary = parse(["--render-preview", "/a.ptex", "-o", "/b.png", "--json"])
+	assert_eq(o.errors, [])
+	assert_eq(o.mode, "--render-preview")
+	assert_eq(o.files, ["/a.ptex"])
+	assert_eq(o.meshes, ["sphere", "plane"])
+	assert_eq(o.env, "Studio")
+	assert_eq(o.size, CliInspect.RENDER_DEFAULT_SIZE)
+
+func test_render_preview_options() -> void:
+	var o: Dictionary = parse(["--render-preview", "/a.ptex", "--mesh", "Cube+sphere+cube", "--env", "Epping Forest", "--size", "256", "-o", "/b.png"])
+	assert_eq(o.errors, [])
+	assert_eq(o.meshes, ["cube", "sphere"])
+	assert_eq(o.env, "Epping Forest")
+	assert_eq(o.size, 256)
+
+func test_render_preview_errors() -> void:
+	assert_eq(parse(["--render-preview", "/a.ptex", "--mesh", "torus", "-o", "/b.png"]).errors.size(), 1)
+	assert_eq(parse(["--render-preview", "/a.ptex"]).errors, ["no output file (expected -o <file.png>)"])
+	assert_eq(parse(["--render-preview", "-o", "/b.png"]).errors, ["--render-preview takes exactly one input file"])
 
 # JSON conversion
 

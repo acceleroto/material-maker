@@ -6,6 +6,8 @@ extends Node
 #   --validate <file.ptex>... [--json]        missing types, bad connections, shader compile errors
 #   --render-output <file.ptex> --node <name> [--port <n>] [--size <px>] -o <file.png> [--json]
 #                                             render one output of one node (a/b for sub-graph nodes)
+#   --render-preview <file.ptex> [--mesh sphere+plane] [--env Studio] [--size <px>] -o <file.png> [--json]
+#                                             lit 3D preview of the material (cli_preview.gd)
 
 const EXIT_OK : int = 0
 const EXIT_BAD_ARGS : int = 1
@@ -13,15 +15,23 @@ const EXIT_LOAD : int = 2
 const EXIT_RENDER : int = 3
 const EXIT_INVALID : int = 4
 
-const MODES : Array[String] = [ "--list-nodes", "--describe-node", "--validate", "--render-output" ]
+const MODES : Array[String] = [ "--list-nodes", "--describe-node", "--validate", "--render-output", "--render-preview" ]
 
 # --render-output defaults and limits
 const RENDER_DEFAULT_SIZE : int = 512
 const RENDER_MIN_SIZE : int = 16
 const RENDER_MAX_SIZE : int = 8192
 const RENDER_EXTENSIONS : Array[String] = [ "png", "exr", "jpg", "webp" ]
-# Options that take a value, only valid with --render-output
-const RENDER_OPTIONS : Array[String] = [ "--node", "--port", "--size", "-o", "--output" ]
+# Options that take a value, and the modes that accept them
+const RENDER_OPTIONS : Dictionary = {
+	"--node": [ "--render-output" ], "--port": [ "--render-output" ],
+	"--mesh": [ "--render-preview" ], "--env": [ "--render-preview" ],
+	"--size": [ "--render-output", "--render-preview" ], "-o": [ "--render-output", "--render-preview" ],
+	"--output": [ "--render-output", "--render-preview" ]
+}
+const PREVIEW_MESHES : Array[String] = [ "sphere", "plane", "cube" ]
+const PREVIEW_DEFAULT_MESH : String = "sphere+plane"
+const PREVIEW_DEFAULT_ENV : String = "Studio"
 
 # Same values as the NodeLibraryManager node in material_maker/main_window.tscn
 const LIBRARY_MANAGER_SETTINGS : Dictionary = {
@@ -68,7 +78,8 @@ class ShaderErrorCapture:
 
 static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 	var rv : Dictionary = { mode = "", types = [] as Array[String], all = false, files = [] as Array[String], json = false,
-			node = "", port = 0, size = RENDER_DEFAULT_SIZE, output = "", errors = [] as Array[String] }
+			node = "", port = 0, size = RENDER_DEFAULT_SIZE, output = "", meshes = [] as Array[String],
+			env = PREVIEW_DEFAULT_ENV, errors = [] as Array[String] }
 	var start : int = -1
 	for m : String in MODES:
 		var index : int = args.find(m)
@@ -101,6 +112,15 @@ static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 			match arg:
 				"--node":
 					rv.node = value
+				"--mesh":
+					rv.meshes.clear()
+					for m : String in value.to_lower().split("+"):
+						if not PREVIEW_MESHES.has(m):
+							rv.errors.append("unknown --mesh %s (expected %s, or several joined with +)" % [ m, "|".join(PREVIEW_MESHES) ])
+						elif not rv.meshes.has(m):
+							rv.meshes.append(m)
+				"--env":
+					rv.env = value
 				"--port":
 					if not value.is_valid_int() or value.to_int() < 0:
 						rv.errors.append("invalid --port %s (expected an output index >= 0)" % value)
@@ -117,16 +137,17 @@ static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 			rv.errors.append("unknown option "+arg)
 		elif rv.mode == "--describe-node":
 			rv.types.append(arg)
-		elif rv.mode == "--validate" or rv.mode == "--render-output":
+		elif rv.mode in [ "--validate", "--render-output", "--render-preview" ]:
 			rv.files.append(arg)
 		else:
 			rv.errors.append("unexpected argument "+arg)
 		i += 1
 	if not rv.errors.is_empty():
 		return rv
-	if rv.mode != "--render-output" and not render_options.is_empty():
-		rv.errors.append("%s is only valid with --render-output" % render_options[0])
-		return rv
+	for o : String in render_options:
+		if not RENDER_OPTIONS[o].has(rv.mode):
+			rv.errors.append("%s is only valid with %s" % [ o, " or ".join(RENDER_OPTIONS[o]) ])
+			return rv
 	match rv.mode:
 		"--describe-node":
 			if rv.all and not rv.types.is_empty():
@@ -136,11 +157,13 @@ static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 		"--validate":
 			if rv.files.is_empty():
 				rv.errors.append("no input file")
-		"--render-output":
+		"--render-output", "--render-preview":
 			if rv.files.size() != 1:
-				rv.errors.append("--render-output takes exactly one input file")
-			if rv.node == "":
+				rv.errors.append("%s takes exactly one input file" % rv.mode)
+			if rv.mode == "--render-output" and rv.node == "":
 				rv.errors.append("no node (expected --node <name>)")
+			if rv.mode == "--render-preview" and rv.meshes.is_empty():
+				rv.meshes.append_array(PREVIEW_DEFAULT_MESH.split("+"))
 			if rv.output == "":
 				rv.errors.append("no output file (expected -o <file.png>)")
 			elif not RENDER_EXTENSIONS.has(rv.output.get_extension().to_lower()):
@@ -283,6 +306,14 @@ func run(h : Node, args : PackedStringArray) -> void:
 				result = await validate_files(options.files)
 			"--render-output":
 				result = await render_output_file(options.files[0], options.node, options.port, options.size, options.output)
+			"--render-preview":
+				var preview : Node = preload("res://cli_preview.gd").new()
+				add_child(preview)
+				result = await preview.render(self, options.files[0], options.meshes, options.env, options.size, options.output)
+				preview.queue_free()
+		# A script error aborts the render without reporting anything: never claim success without a file
+		if options.mode in [ "--render-output", "--render-preview" ] and host.exit_code == EXIT_OK and result.get("file", "") == "":
+			host.show_error("%s wrote no file (script error? see the log)" % options.mode, EXIT_RENDER)
 	if options.json:
 		var summary : Dictionary = {
 			mm_cli = 1,
@@ -646,6 +677,13 @@ static func renderable_node_names(graph : MMGenBase, max_count : int = 40) -> St
 		return ", ".join(names.slice(0, max_count))+", ..."
 	return ", ".join(names)
 
+# The rendering device is created by the rendering thread shortly after startup
+func wait_for_rendering_device(timeout_ms : int = 5000) -> bool:
+	var deadline : int = Time.get_ticks_msec()+timeout_ms
+	while mm_renderer.rendering_device == null and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	return mm_renderer.rendering_device != null
+
 # Same wait as MMGenMaterial.export_material: nodes downstream of buffers read the buffers' textures
 func wait_for_buffers() -> void:
 	if mm_deps.get_render_queue_size() > 0:
@@ -659,11 +697,7 @@ func wait_for_buffers() -> void:
 
 func render_output_file(path : String, node_path : String, port : int, size : int, output : String) -> Dictionary:
 	var rv : Dictionary = { input=path, node=node_path, port=port, size=size, file="" }
-	# The rendering device is created by the rendering thread shortly after startup
-	var deadline : int = Time.get_ticks_msec()+5000
-	while mm_renderer.rendering_device == null and Time.get_ticks_msec() < deadline:
-		await get_tree().process_frame
-	if mm_renderer.rendering_device == null:
+	if not await wait_for_rendering_device():
 		host.show_error("no rendering device (headless?), cannot render", EXIT_RENDER)
 		return rv
 	var gen : MMGenBase = await mm_loader.load_gen(path)
