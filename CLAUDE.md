@@ -63,6 +63,9 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 - Engine inspection (source mode, since 3.1; `cli_inspect.gd`): `<Godot> --path <Repo> --list-nodes --json`,
   `--describe-node <type>...|--all --json`, `--validate <abs ptex>... --json` (exit 0/1/2/4). `mmx catalog`
   regenerates `catalog.json` + `NODES.md` from them (`--static` = Python-only).
+- Lit 3D preview (since 4.2): `python3 agent_tools/mmx.py preview <ptex>` (engine `--render-preview <abs ptex>
+  [--mesh sphere+plane] [--env Studio] [--size px] -o <abs png> --json`); `mmx run` renders it into
+  `iter_NNN/preview_3d.png` and the top row of `sheet.png`. It is the primary image to judge.
 - Per-node preview (since 4.1): `python3 agent_tools/mmx.py node-preview <ptex> --node <name> [--port N]`
   (engine `--render-output <abs ptex> --node <name> [--port n] [--size px] -o <abs png> --json`, exit 0/1/2/3).
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.

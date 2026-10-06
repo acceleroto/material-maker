@@ -18,7 +18,8 @@ with SKILL.md** (it is a copy of the skill body).
 ## Making a material from a description
 
 You build a `.ptex` graph (JSON), export it with Material Maker through `agent_tools/mmx.py`,
-look at the contact sheet, and repeat until it matches the request. Everything runs from the
+look at the contact sheet (whose top row is Material Maker's own lit 3D preview), and repeat until
+it matches the request. Everything runs from the
 repo root: `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`.
 
 **When to use:** the user asks for a texture or material in words or with a photo ("dry cracked desert
@@ -50,12 +51,17 @@ Reference, read on demand (don't inline them into your context all at once):
    names the faulty node); use `--fast` to skip it for quick structural checks between edits.
 5. **Run**: `python3 agent_tools/mmx.py run <ptex> --run-name <run> --note "what changed and why"`.
    Creates `agent_runs/<run>/iter_NNN/` with a ptex copy, `out/` (Unity/URP maps + `.mat`),
-   `sheet.png`, `mmx_result.json`. `--run-name` may nest (`1.3/desert`). ~2–8 s per export.
+   `preview_3d.png` (lit 3D preview), `sheet.png`, `mmx_result.json`. `--run-name` may nest
+   (`1.3/desert`). ~6–10 s per iteration (export + ~3 s preview). A failed preview is only a warning
+   in the result (the sheet then has no 3D row); check `preview` / `warnings` in the JSON.
    If it reports `error: timeout`: start the same command with the Terminal panel
    (`run_in_terminal`) and block on `python3 agent_tools/mmx.py wait --run-name <run>` from Bash.
-6. **Look at `iter_NNN/sheet.png`** (Read the image) and **write `iter_NNN/critique.md`**:
-   for each trait from step 1, matches / doesn't, plus the single biggest gap and what you'll
-   change next. Be concrete ("cracks too thin: ~1 px at 2048"), not vague ("needs work").
+6. **Look at `iter_NNN/sheet.png`** (Read the image) and **write `iter_NNN/critique.md`**.
+   **Judge from the 3D preview (the sheet's top row) first:** it is the material as Material Maker
+   renders it (real lighting, specular, normal + height on a sphere and a plane, fixed camera and the
+   neutral Studio environment, so iterations are directly comparable). Use the flat maps below it only
+   to diagnose *why* something looks off. For each trait from step 1: matches / doesn't, plus the
+   single biggest gap and what you'll change next. Be concrete ("cracks too thin: ~1 px at 2048"), not vague ("needs work").
    **Something didn't show up or looks wrong and you can't tell why?** Render the suspect stages
    (doesn't count as an iteration): `python3 agent_tools/mmx.py node-preview <ptex> --node <name> [--port N]`
    (`a/b` for a node inside sub-graph `a`; ~2 s each) and Read the PNG it prints. Walk upstream from the
@@ -72,12 +78,19 @@ still off, seconds per iteration. Point the user at the final `sheet.png` and `o
 
 ### Reading the contact sheet
 
-Tiles, left to right, top to bottom (only maps that were exported appear):
-- **lit**: crude Lambert preview (light from the top-left, albedo × N·L × AO; raised things are lit on
-  their top-left side and shadowed bottom-right; sheets made before the Session 1.3 fix were lit
-  from the bottom-left, so old Phase-0/1.2 sheets show bumps as dents). This is your main
-  "does it read as X" view. No specular and no parallax: metal and gloss look flat and dull here,
-  so judge metal from the roughness/metallic tiles instead.
+**Top row: 3D preview — the primary image to judge.** Material Maker's own 3D preview (the editor's
+preview scene and the Material node's preview shader): a sphere (left) and a tilted plane (right),
+Studio environment (grey background, studio HDRI + sun). It shows what the flat maps can't: gloss
+and specular highlights, metal, how strong the relief really reads, and scale on a curved surface
+(the sphere wraps the texture 4×2, the plane 2×2; the sphere's poles always pinch). Same camera, lights
+and environment every iteration, so compare iterations side by side. Quick look without exporting:
+`python3 agent_tools/mmx.py preview <ptex>` (→ `agent_runs/preview/<name>.png`; `--mesh cube`,
+`--env "Epping Forest"` to vary, but keep the defaults for iteration-to-iteration comparisons).
+
+Map tiles below it, left to right, top to bottom (only maps that were exported appear):
+- **lit**: crude Python Lambert preview of the exported maps (light from the top-left, albedo × N·L × AO).
+  Secondary now: useful to check the *exported* Unity maps agree with the 3D preview (e.g. normal
+  direction), not to judge the look. No specular: metal and gloss look flat and dull here.
 - **lit tiled 2x2**: seams (visible lines at the tile border) and obvious repetition.
 - **albedo**: colour only. Real-world albedo is rarely near pure black or white.
 - **normal**: should show the relief you intend. Mostly flat lavender = too weak; harsh rainbow

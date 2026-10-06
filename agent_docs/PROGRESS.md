@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 4.2 (in progress)
+**Current session:** 4.2 (complete); next 4.3
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -136,18 +136,39 @@
   stylized_wall's `bricks` port 0 is all white (mortar 0, bevel 0; the graph only uses port 1) — correct.
   Docs: `agent_tools/README.md`, CLAUDE.md, SKILL.md + AGENTS.md (debug step now uses node-preview first).
 
+- 4.2 (agent, 2026-10-06): engine `--render-preview <abs ptex> [--mesh sphere|plane|cube|a+b] [--env name|index]
+  [--size px] -o <abs png> [--json]` in new `cli_preview.gd` (parsing in `cli_inspect.gd`; `parse_args.gd` dispatch
+  line only). Reuses the editor: `preview_3d_scene.tscn` (objects/camera/sun/WorldEnvironment) in an own-world
+  SubViewport, `EnvironmentManager.apply_environment` (bundled HDRIs; default **Studio**: grey bg + studio HDRI +
+  sun), `MMGenMaterial.update_material` (Material preview shader + preview textures at the graph's size).
+  Default sphere+plane side by side, 512 px per view. Deviations (all for reproducibility, in README): per-mesh FOV
+  (sphere 30°, plane 37°, cube 31° vs editor 50°, same camera pose), UV scales reset to the scene's (editor applies
+  user `mm_config.ini`), opaque bg, MSAA 4×; `mm_globals.main_window` stub (tessellation 256) only while generating
+  cube/plane meshes; EnvironmentManager kept out of the tree (its `_exit_tree` rewrites `user://environments.json`).
+  **Deterministic** (two renders byte-identical). ~2–4 s per render. Guard: render modes now fail ("wrote no file")
+  if a script error aborts them — found when a GDScript error made a run report ok. Also found: a script that fails
+  to compile makes the app hang instead of quitting (mmx's timeout covers it).
+  mmx: `preview` (defaults `preview_mesh/env/size` in mmx.toml), `run` renders `iter_NNN/preview_3d.png` (failure =
+  warning; `--no-preview` / `preview_3d = false`), `sheet` puts the preview as a full-width top row (`--preview`,
+  else `<dir>/preview_3d.png`, else `<dir>/../preview_3d.png`). `mmx run` bricks: 8.4 s total (export 5.4 s +
+  preview 2.0 s); stylized_wall `--size 1024`: 9.1 s. Checked: bricks, stylized_wall, dry_earth look right; a mortar
+  colour edit (colorize_0 → blue) is clearly visible; cube + Epping Forest/Moonless Golf render; errors for unknown
+  env/mesh, no Material node (exit 1), missing file (2). Tests: GUT 41 pass; mmx 57 pass (fake-engine preview,
+  sheet top row, run with preview ok/failing/disabled, real-engine render). Images: `agent_runs/4.2/`
+  (`compare.png` = bricks / blue-mortar bricks / dry_earth), `agent_runs/4.2/{wall,bricks}/iter_001/sheet.png`.
+  Docs: SKILL.md + AGENTS.md (3D preview = primary image to judge; Lambert tile secondary), README, CLAUDE.md.
+
 ## In progress
-- 4.2: engine `--render-preview` works (cli_preview.gd, editor preview scene + EnvironmentManager + Material preview shader;
-  deterministic, ~2.6 s). `mmx preview`, sheet top row and `mmx run` integration done (57 mmx tests). Next: docs.
+- None.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 4.2 per ROADMAP.md "### 4.2" (plan mode first): `--render-preview <ptex> --mesh sphere|plane|cube
-  --env <name> --size <px> -o <png>` (material on a mesh, fixed camera/lighting; see `material_maker/meshes`,
-  `material_maker/environments`). Useful from 4.1: `cli_inspect.gd` `render_output_file()` (load, wait for
-  RD + buffers, render, save; exit codes) and `mmx node_preview()` (run_engine wrapper, stale-file removal).
-  Material preview needs the Material node's 3D shader (`MMGenMaterial` preview textures, `gen_material.gd`
-  ~l.110-210) and a real 3D viewport (not the compute path). Tests: GUT
-  `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`, `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.
+- Session 4.3 per ROADMAP.md "### 4.3": finish anything left from 4.1/4.2 (nothing known open; optional: a
+  `--texture-size` for faster previews of 4096 graphs, since preview textures render at the graph's own size),
+  then re-run the three Phase 1.3 requests (desert, steel, oak; see `agent_docs/phase1_report.md` and
+  `agent_runs/1.3/`) following SKILL.md, judging from the 3D preview row of `sheet.png`. Write
+  `agent_docs/phase4_report.md` comparing quality and iteration count with `phase1_report.md`. Commit, push,
+  update PROGRESS.md (next: 5.1). Tests: GUT `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
+  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.

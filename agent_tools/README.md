@@ -17,9 +17,10 @@ python3 agent_tools/mmx.py catalog [--static]  # rebuild catalog.json + agent_do
 python3 agent_tools/mmx.py validate <file.ptex> [--fast] [--timeout S]
 python3 agent_tools/mmx.py node <type>        # one type's params/ports as JSON
 python3 agent_tools/mmx.py export <file.ptex> --out <dir> [--target "Unity/URP"] [--timeout S] [--keep-meta]
-python3 agent_tools/mmx.py sheet <dir> [--out sheet.png]
+python3 agent_tools/mmx.py sheet <dir> [--out sheet.png] [--preview preview_3d.png]
+python3 agent_tools/mmx.py preview <ptex> [--mesh sphere+plane] [--env Studio] [--size 512] [--out x.png]
 python3 agent_tools/mmx.py node-preview <ptex> --node NAME [--port N] [--size 512] [--out x.png]
-python3 agent_tools/mmx.py run <file.ptex> --run-name NAME [--note "what changed"]
+python3 agent_tools/mmx.py run <file.ptex> --run-name NAME [--note "what changed"] [--no-preview]
 python3 agent_tools/mmx.py wait (<dir> | --run-name NAME) [--timeout S]
 agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain python3 skips the sheet test
                                      # TestRealEngine runs Godot (~1 min); MMX_SKIP_ENGINE=1 skips it
@@ -38,6 +39,13 @@ agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain py
   where the Python parse disagrees with the engine (2026-10-06: only `comment_line`, `webcam`).
   `--static` skips the engine; `--nodes-dir DIR` (static only) adds a `.mmg` dir that overrides repo
   defs (e.g. the release app's `nodes/`). Re-run after changing node definitions; commit both outputs.
+- **preview** (Session 4.2): lit 3D preview of a `.ptex` with the engine's `--render-preview` (~2.5–4 s;
+  source mode only): the editor's 3D preview scene and the Material node's own preview shader, sphere
+  + plane side by side, Studio environment, fixed camera. Defaults (`preview_mesh`, `preview_env`,
+  `preview_size` per view) come from `mmx.toml`; keep them fixed so iterations stay comparable. Default
+  file `agent_runs/preview/<ptex stem>.png`. Prints `{"ok", "file", "meshes", "env", "size", "width",
+  "height", "image_size" (the graph's texture size the preview textures are rendered at), "seconds",
+  "errors", "warnings"}`; exit 0/1.
 - **node-preview** (Session 4.1): renders one output of one node to a PNG with the engine's
   `--render-output` (~2 s, ~3.5 s for graphs with buffers; source mode only). `--node` is the node name,
   `a/b` for node `b` inside sub-graph node `a`; `--port` the output index (default 0); `--size` default
@@ -95,6 +103,7 @@ unknown type, 3 render failure (`--render-output`), 4 validation errors.
 <Godot> --path <repo> --describe-node bricks3 blend2 --json    # or --describe-node --all (~2 s)
 <Godot> --path <repo> --validate <abs a.ptex> [<abs b.ptex>...] --json
 <Godot> --path <repo> --render-output <abs a.ptex> --node graph/Bricks [--port 0] [--size 512] -o <abs x.png> --json
+<Godot> --path <repo> --render-preview <abs a.ptex> [--mesh sphere+plane] [--env Studio] [--size 512] -o <abs x.png> --json
 ```
 
 - `--list-nodes`: `items` = every add-node menu entry, read through the editor's own library manager
@@ -119,6 +128,22 @@ unknown type, 3 render failure (`--render-output`), 4 validation errors.
   **not** for normals: a `normal_map` node's raw output is MM's internal format (blue ≈ 0.1, red flipped),
   the target converts it when exporting. Exit 1 for unknown node / port out of range / node without
   outputs (Material, comment), 2 load failure, 3 render or write failure.
+- `--render-preview` (Session 4.2, `cli_preview.gd`): reuses the editor's pieces instead of new ones:
+  `preview_3d_scene.tscn` (objects, camera, sun, WorldEnvironment) in an own-world SubViewport,
+  `EnvironmentManager.apply_environment` with `material_maker/environments/environments.json` (bundled
+  HDRIs: Epping Forest, Moonless Golf, Studio; `--env` = name, case-insensitive, or index), and
+  `MMGenMaterial.update_material` (the Material node's preview shader + preview textures, rendered via
+  `mm_deps` at the graph's own texture size). `--mesh` = `sphere`, `plane`, `cube`, or several joined with
+  `+` (one `size`×`size` view each, side by side; default `sphere+plane`). Differences from the editor,
+  all for reproducibility: per-mesh field of view (sphere 30°, plane 37°, cube 31°; editor 50° — same
+  camera position/angle, just zoomed in), UV scales reset to the scene's (sphere 4×2, plane 2×2, cube 3×2;
+  the editor applies the user's `mm_config.ini` overrides), opaque background, MSAA 4×. Tessellation 256
+  (editor default) via a stub `mm_globals.main_window` that exists only while the cube/plane mesh is
+  generated. The EnvironmentManager is never added to the tree (its `_exit_tree` rewrites
+  `user://environments.json`). Deterministic: two renders are byte-identical. Summary adds `input`,
+  `meshes`, `env`, `env_index`, `size`, `width`, `height`, `image_size`, `file`, `seconds`. Exit 1 unknown
+  mesh/env or no `Material` node, 2 load failure, 3 render/write failure. Both render modes fail with
+  "wrote no file" if a script error aborted them (instead of silently reporting ok).
 - GUT: `<Godot> --headless --path <repo> -s addons/gut/gut_cmdln.gd -gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd -gexit`.
 
 ### Limitations
@@ -181,15 +206,19 @@ Prints and writes `<out>/mmx_result.json`: `ok`, `stage` (validate/plan/export/d
 - Tests (GUT): `<godot> --headless --path <repo> -s addons/gut/gut_cmdln.gd -gtest=res://test/test_parse_args.gd -gexit`
   (parsing only, so `--headless` is fine; GUT prints one harmless `SCRIPT ERROR` from its own loader).
 
-**sheet**: one PNG of everything in an export dir: `lit` (crude Lambert, light from top-left,
+**sheet**: one PNG of everything in an export dir. Top row (full width): the 3D preview, if there is one
+(`--preview`, else `<dir>/preview_3d.png`, else `<dir>/../preview_3d.png` — where `mmx run` puts it).
+Then `lit` (crude Lambert, light from top-left,
 from albedo+normal+AO), `lit tiled 2x2` (seams/repetition), then albedo, normal, height,
 roughness, metallic, AO, emission, ... Packed maps are split (Unity `metal_smoothness`: R =
 metallic, roughness = 1 − A; Godot `orm`: R/G/B = AO/roughness/metallic). Grayscale tiles are
 labeled with min/mean/max so flat or clipped maps are obvious. Default output `<dir>/sheet.png`.
 
 **run**: claims the next `agent_runs/<run>/iter_NNN/` (from 001; `--run-name` may nest with `/`, e.g. `1.3/desert`), copies the ptex there (outputs
-are named after it), exports into `iter_NNN/out/`, writes `iter_NNN/sheet.png`,
-`mmx_result.json` (export result + `iter_dir`, `sheet`), `mmx_status.json` (running/done) and
+are named after it), exports into `iter_NNN/out/`, renders `iter_NNN/preview_3d.png` (source mode,
+`preview_3d = true` in mmx.toml, not with `--no-preview`; a failed preview adds a warning and the
+sheet has no 3D row), writes `iter_NNN/sheet.png`, `mmx_result.json` (export result + `iter_dir`,
+`sheet`, `preview` {ok, file, meshes, env, seconds, errors}), `mmx_status.json` (running/done) and
 `note.md` (`--note`). Validation failures still use up an iteration dir (the result explains why).
 
 **wait**: for when the app has to be launched from the Terminal panel. Start
