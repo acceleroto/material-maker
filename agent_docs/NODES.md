@@ -45,8 +45,8 @@ Creates a workflow map using a heightmap and an optional seed map. The workflow 
 - params: `height` float 0..1=1 · `angle` float -180..180=0
 
 ### `mwf_mix` — Mix · Workflow/Mix
-Combines the outputs of several mapped base materials, keeping the "highest" material (generic: '#' items repeat generic_size times)
-- in: 0 `h1` f Height1: An height map · 1 `c1` rgb Albedo1: An albedo channel · 2 `orm1` rgb ORM1: A combination of ambient occlusion, roughness and metallic channels · 3 `em1` rgb Emission1: An emission channel · 4 `nm1` rgb Normal1: A normal map
+Combines the outputs of several mapped base materials, keeping the "highest" material (generic: '#' items repeat generic_size times, default 2; shown at default)
+- in: 0 `h1` f Height1: An height map · 1 `c1` rgb Albedo1: An albedo channel · 2 `orm1` rgb ORM1: A combination of ambient occlusion, roughness and metallic channels · 3 `em1` rgb Emission1: An emission channel · 4 `nm1` rgb Normal1: A normal map · 5 `h2` f Height2: An height map · 6 `c2` rgb Albedo2: An albedo channel · 7 `orm2` rgb ORM2: A combination of ambient occlusion, roughness and metallic channels · 8 `em2` rgb Emission2: An emission channel · 9 `nm2` rgb Normal2: A normal map
 - out: 0 f Height: Generates the height of the result · 1 rgb Albedo: Shows the output albedo channel · 2 rgb ORM: Shows the output ambient occlusion, roughness and metallic channels · 3 rgb Emission: Shows the output emission channel · 4 rgb Normal: Shows the output normal map
 
 ### `mwf_map` — Apply Map · Workflow/Apply Map
@@ -204,7 +204,7 @@ Adjusts the Hue, Saturation and Value of its input
 - params: `in_min` color=(0,0,0,0) · `in_mid` color=(0.498,0.498,0.498,0.498) · `in_max` color=(1,1,1,1) · `out_min` color=(0,0,0,1) · `out_max` color=(1,1,1,1)
 
 ### `tones_map` — Tones Map · Filter/Tones/Map
-Maps linearly an input tones interval to an output tones interval. (generic: '#' items repeat generic_size times)
+Maps linearly an input tones interval to an output tones interval. (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `in1` rgba Input1: The input image
 - out: 0 rgba Output1: Shows the generated remapped image
 - params: `in_min` (Input min) float 0..1=0.5 · `in_max` (Input max) float 0..1=0.5 · `out_min` (Output min) float 0..1=1 · `out_max` (Output max) float 0..1=0.5
@@ -240,13 +240,13 @@ Blends its input, using an optional mask
 - params: `blend_type` (Blend mode) enum[0 Normal, 1 Dissolve, 2 Multiply, 3 Screen, 4 Overlay, 5 Hard Light, 6 Soft Light, 7 Burn, 8 Dodge, 9 Lighten, 10 Darken, 11 Difference, 12 Additive, 13 AddSub, 14 Linear Light]=13 · `amount` (Opacity) float 0..1=0.5
 
 ### `blend2` — Blend · Filter/Blend
-Blends its input, using an optional mask (generic: '#' items repeat generic_size times)
+Blends its input, using an optional mask (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `b` rgba Background: The background input · 1 `l1` rgba Layer1: A layer input · 2 `a1` f Mask1: An optional opacity mask
 - out: 0 rgba Output: Shows the result of the blend operation
 - params: `blend_type1` (Blend mode) enum[0 Normal, 1 Dissolve, 2 Multiply, 3 Screen, 4 Overlay, 5 Hard Light, 6 Soft Light, 7 Burn, 8 Dodge, 9 Lighten, 10 Darken, 11 Difference, 12 Additive, 13 AddSub, 14 Linear Light, 15 Vivid Light, 16 Pin Light, 17 Hard Mix, 18 Exclusion, 19 Hue, 20 Saturation, 21 Color, 22 Value]=0 · `amount1` (Opacity) float 0..1=0.5
 
 ### `normal_blend2` — Normal Blend · Filter/Normal Map/Blend
-Blends normal maps using an optional mask (generic: '#' items repeat generic_size times)
+Blends normal maps using an optional mask (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `b` rgb Foreground: The foreground input · 1 `l1` rgb Background: The background input · 2 `a1` f Mask: The optional opacity mask
 - out: 0 rgb
 - params: `amount1` float 0..1=0.5
@@ -356,31 +356,31 @@ A fill companion node that generated an UV map that follows each filled area
 ## Transforms and warps
 
 ### `transform2` — Transform · Transform
-Translates, rotates and scales its input (generic: '#' items repeat generic_size times)
+Translates, rotates and scales its input (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `i1` rgba Input1: An input image to be transformed · 1 `tx` f TranslateMap.x: An optional map for translation along the X axis · 2 `ty` f TranslateMap.y: An optional map for translation along the Y axis · 3 `r` f RotateMap: An optional map for rotation · 4 `sx` f ScaleMap.x: An optional map for scaling along the X axis · 5 `sy` f ScaleMap.y: An optional map for scaling along the Y axis
 - out: 0 rgba Output1: Shows a transformed image
 - params: `translate_x` float -1..1=0 · `translate_y` float -1..1=0 · `rotate` float -720..720=0 · `scale_x` float 0..50=1 · `scale_y` float 0..50=1 · `mode` enum[0 Clamp, 1 Repeat, 2 Extend]=0
 
 ### `translate` — Translate · Transform/Translate
-Translates its input (generic: '#' items repeat generic_size times)
+Translates its input (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `i1` rgba Input1: An input image
 - out: 0 rgba Output1: Shows a translated image
 - params: `translate_x` float -1..1=0 · `translate_y` float -1..1=0
 
 ### `rotate` — Rotate · Transform/Rotate
-Rotates its input (generic: '#' items repeat generic_size times)
+Rotates its input (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `i1` rgba Input1: An input image
 - out: 0 rgba Output1: Shows a rotated image
 - params: `cx` (Center X) float -1..1=0 · `cy` (Center Y) float -1..1=0 · `rotate` float -720..720=0
 
 ### `scale` — Scale · Transform/Scale
-Scales its input (generic: '#' items repeat generic_size times)
+Scales its input (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `i1` rgba Input1: An input image
 - out: 0 rgba Output1: Shows a scaled image
 - params: `cx` (Center X) float -1..1=0 · `cy` (Center Y) float -1..1=0 · `scale_x` float 0..50=1 · `scale_y` float 0..50=1
 
 ### `mirror` — Mirror · Transform/Mirror
-Mirrors its input while applying an offset from the center (generic: '#' items repeat generic_size times)
+Mirrors its input while applying an offset from the center (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `i1` rgba Input1: The input image
 - out: 0 rgba Output1: Shows the mirrored image
 - params: `direction` enum[0 Horizontal, 1 Vertical]=0 · `offset` float 0..1=0 · `flip_sides` bool=false
@@ -391,13 +391,13 @@ Places 4 input images into a single output to create an atlas of 4 images. Chain
 - out: 0 rgba Output: Shows the generated atlas
 
 ### `kaleidoscope2` — Kaleidoscope · Transform/Kaleidoscope
-Replicated an angle of the input image several times around the center. (generic: '#' items repeat generic_size times)
+Replicated an angle of the input image several times around the center. (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `i1` rgba Input1: The input image
 - out: 0 rgba Output1: Shows the transformed image
 - params: `count` float 2..10=5 · `offset` float -180..180=0 · `variations` bool=false
 
 ### `warp` — Warp · Transform/Warp
-Warps its input according to a heightmap (generic: '#' items repeat generic_size times)
+Warps its input according to a heightmap (generic: '#' items repeat generic_size times, default 1; shown at default)
 - in: 0 `in1` rgba Input1: The input image to be warped · 1 `d` f Height map: The height map whose slopes are used to deform the input · 2 `strength_map` f Strength map: Map that affects the strength parameter
 - out: 0 rgba Output1: Shows the warped image
 - params: `mode` enum[0 Slope, 1 Distance to top]=0 · `amount` (Strength) float 0..1=0 · `eps` (Epsilon) float 0.005..0.2=0

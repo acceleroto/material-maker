@@ -47,6 +47,80 @@
   "Simple/Stamp",
   "Material/Leather"
  ],
+ "port_types": {
+  "f": {
+   "label": "Grayscale",
+   "slot_type": 0,
+   "converts_to": [
+    "rgb",
+    "rgba"
+   ]
+  },
+  "rgb": {
+   "label": "Color",
+   "slot_type": 0,
+   "converts_to": [
+    "f",
+    "rgba"
+   ]
+  },
+  "rgba": {
+   "label": "RGBA",
+   "slot_type": 0,
+   "converts_to": [
+    "f",
+    "rgb"
+   ]
+  },
+  "sdf2d": {
+   "label": "SDF2D",
+   "slot_type": 1,
+   "converts_to": []
+  },
+  "sdf3d": {
+   "label": "SDF3D",
+   "slot_type": 2,
+   "converts_to": [
+    "sdf3dc"
+   ]
+  },
+  "sdf3dc": {
+   "label": "SDF3D-C",
+   "slot_type": 2,
+   "converts_to": [
+    "sdf3d"
+   ]
+  },
+  "tex3d_gs": {
+   "label": "Grayscale TEX3D",
+   "slot_type": 3,
+   "converts_to": [
+    "tex3d"
+   ]
+  },
+  "tex3d": {
+   "label": "TEX3D",
+   "slot_type": 3,
+   "converts_to": [
+    "tex3d_gs"
+   ]
+  },
+  "v4v4": {
+   "label": "V4->V4",
+   "slot_type": 4,
+   "converts_to": []
+  },
+  "fill": {
+   "label": "Fill",
+   "slot_type": 5,
+   "converts_to": []
+  },
+  "any": {
+   "label": "",
+   "slot_type": 42,
+   "converts_to": []
+  }
+ },
  "types": {
   "adjust_hsv": {
    "type": "adjust_hsv",
@@ -890,6 +964,7 @@
    ],
    "source": "addons/material_maker/nodes/blend2.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -3207,6 +3282,7 @@
    ],
    "source": "addons/material_maker/nodes/circle_map.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -4059,6 +4135,7 @@
    ],
    "source": "addons/material_maker/nodes/color_pick.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -4430,7 +4507,7 @@
    "type": "comment",
    "kind": "builtin",
    "label": "comment",
-   "shortdesc": "Comment box (no ports).",
+   "shortdesc": "Comment box (no ports; free-form fields not checked).",
    "longdesc": "",
    "dynamic": false,
    "source": "addons/material_maker/engine/nodes/gen_comment.gd",
@@ -4549,6 +4626,7 @@
    ],
    "source": "addons/material_maker/nodes/controlled_variations.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -5261,6 +5339,7 @@
    ],
    "source": "addons/material_maker/nodes/custom_uv2.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -6093,6 +6172,7 @@
    ],
    "source": "addons/material_maker/nodes/directional_warp.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -9432,6 +9512,7 @@
    ],
    "source": "addons/material_maker/nodes/inverse_circle_map.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [],
     "inputs": [
@@ -9944,6 +10025,7 @@
    ],
    "source": "addons/material_maker/nodes/kaleidoscope.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -10058,6 +10140,7 @@
    ],
    "source": "addons/material_maker/nodes/kaleidoscope2.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -11682,6 +11765,7 @@
    ],
    "source": "addons/material_maker/nodes/mirror.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -12403,6 +12487,47 @@
      "label": "Normal 1",
      "shortdesc": "Normal1",
      "longdesc": "A normal map"
+    },
+    {
+     "index": 5,
+     "name": "h2",
+     "type": "f",
+     "label": "Height 2",
+     "shortdesc": "Height2",
+     "longdesc": "An height map",
+     "group_size": 5
+    },
+    {
+     "index": 6,
+     "name": "c2",
+     "type": "rgb",
+     "label": "Albedo 2",
+     "shortdesc": "Albedo2",
+     "longdesc": "An albedo channel"
+    },
+    {
+     "index": 7,
+     "name": "orm2",
+     "type": "rgb",
+     "label": "ORM 2",
+     "shortdesc": "ORM2",
+     "longdesc": "A combination of ambient occlusion, roughness and metallic channels"
+    },
+    {
+     "index": 8,
+     "name": "em2",
+     "type": "rgb",
+     "label": "Emission 2",
+     "shortdesc": "Emission2",
+     "longdesc": "An emission channel"
+    },
+    {
+     "index": 9,
+     "name": "nm2",
+     "type": "rgb",
+     "label": "Normal 2",
+     "shortdesc": "Normal2",
+     "longdesc": "A normal map"
     }
    ],
    "outputs": [
@@ -12440,6 +12565,7 @@
    ],
    "source": "addons/material_maker/nodes/mwf_mix.mmg",
    "generic": true,
+   "generic_size_default": 2,
    "template": {
     "parameters": [],
     "inputs": [
@@ -12543,6 +12669,27 @@
      "type": "rgb",
      "shortdesc": "Input1",
      "longdesc": "An input map"
+    },
+    {
+     "index": 1,
+     "name": "in2",
+     "type": "rgb",
+     "shortdesc": "Input2",
+     "longdesc": "An input map"
+    },
+    {
+     "index": 2,
+     "name": "in3",
+     "type": "rgb",
+     "shortdesc": "Input3",
+     "longdesc": "An input map"
+    },
+    {
+     "index": 3,
+     "name": "in4",
+     "type": "rgb",
+     "shortdesc": "Input4",
+     "longdesc": "An input map"
     }
    ],
    "outputs": [
@@ -12555,6 +12702,7 @@
    ],
    "source": "addons/material_maker/nodes/mwf_mix_maps.mmg",
    "generic": true,
+   "generic_size_default": 4,
    "template": {
     "parameters": [],
     "inputs": [
@@ -13360,6 +13508,7 @@
    ],
    "source": "addons/material_maker/nodes/normal_blend2.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -14636,6 +14785,7 @@
    ],
    "source": "addons/material_maker/nodes/quantize.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -15441,6 +15591,7 @@
    ],
    "source": "addons/material_maker/nodes/rotate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -15625,6 +15776,7 @@
    ],
    "source": "addons/material_maker/nodes/scale.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -16319,6 +16471,7 @@
    ],
    "source": "addons/material_maker/nodes/sdboolean_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -17144,6 +17297,7 @@
    ],
    "source": "addons/material_maker/nodes/sdf3d_boolean_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -17625,6 +17779,7 @@
    ],
    "source": "addons/material_maker/nodes/sdf3d_color_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -18741,6 +18896,7 @@
    ],
    "source": "addons/material_maker/nodes/sdf3d_rotate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -18886,6 +19042,7 @@
    ],
    "source": "addons/material_maker/nodes/sdf3d_scale.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -18997,6 +19154,7 @@
    ],
    "source": "addons/material_maker/nodes/sdf3d_scale_xyz.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -19191,6 +19349,7 @@
    ],
    "source": "addons/material_maker/nodes/sdf3d_smoothboolean_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -19461,6 +19620,7 @@
    ],
    "source": "addons/material_maker/nodes/sdf3d_translate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -20526,6 +20686,7 @@
    ],
    "source": "addons/material_maker/nodes/sdrotate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -20897,6 +21058,7 @@
    ],
    "source": "addons/material_maker/nodes/sdscale.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -20999,6 +21161,7 @@
    ],
    "source": "addons/material_maker/nodes/sdscalexy.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -21292,6 +21455,7 @@
    ],
    "source": "addons/material_maker/nodes/sdsmoothboolean_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -21644,6 +21808,7 @@
    ],
    "source": "addons/material_maker/nodes/sdtranslate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -22677,6 +22842,7 @@
    ],
    "source": "addons/material_maker/nodes/shear.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -23887,6 +24053,7 @@
    ],
    "source": "addons/material_maker/nodes/spherize.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -24649,6 +24816,7 @@
    ],
    "source": "addons/material_maker/nodes/swirl.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -25181,6 +25349,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_blend_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -25379,6 +25548,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_blend_v2.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -26598,6 +26768,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_quantize.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -26698,6 +26869,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_rotate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -26800,6 +26972,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_scale.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -27004,6 +27177,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_select_shape_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -27116,6 +27290,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_select_v.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -27321,6 +27496,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_tonality.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -27447,6 +27623,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_tones_map.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -27721,6 +27898,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_translate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -28042,6 +28220,7 @@
    ],
    "source": "addons/material_maker/nodes/tex3d_warp.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -29179,6 +29358,7 @@
    ],
    "source": "addons/material_maker/nodes/tonality.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -29391,6 +29571,7 @@
    ],
    "source": "addons/material_maker/nodes/tones_map.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -29865,6 +30046,7 @@
    ],
    "source": "addons/material_maker/nodes/transform2.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -30074,6 +30256,7 @@
    ],
    "source": "addons/material_maker/nodes/translate.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {
@@ -30479,6 +30662,50 @@
      "step": 0.01,
      "shortdesc": "Seed modifier",
      "longdesc": "Seed modifier for output 1"
+    },
+    {
+     "name": "v2",
+     "label": "Seed modifier",
+     "type": "float",
+     "default": 0,
+     "min": 0,
+     "max": 1,
+     "step": 0.01,
+     "shortdesc": "Seed modifier",
+     "longdesc": "Seed modifier for output 1"
+    },
+    {
+     "name": "v3",
+     "label": "Seed modifier",
+     "type": "float",
+     "default": 0,
+     "min": 0,
+     "max": 1,
+     "step": 0.01,
+     "shortdesc": "Seed modifier",
+     "longdesc": "Seed modifier for output 1"
+    },
+    {
+     "name": "v4",
+     "label": "Seed modifier",
+     "type": "float",
+     "default": 0,
+     "min": 0,
+     "max": 1,
+     "step": 0.01,
+     "shortdesc": "Seed modifier",
+     "longdesc": "Seed modifier for output 1"
+    },
+    {
+     "name": "v5",
+     "label": "Seed modifier",
+     "type": "float",
+     "default": 0,
+     "min": 0,
+     "max": 1,
+     "step": 0.01,
+     "shortdesc": "Seed modifier",
+     "longdesc": "Seed modifier for output 1"
     }
    ],
    "inputs": [
@@ -30496,10 +30723,35 @@
      "type": "f",
      "shortdesc": "Output1",
      "longdesc": "Shows a variation of the input"
+    },
+    {
+     "index": 1,
+     "type": "f",
+     "shortdesc": "Output1",
+     "longdesc": "Shows a variation of the input"
+    },
+    {
+     "index": 2,
+     "type": "f",
+     "shortdesc": "Output1",
+     "longdesc": "Shows a variation of the input"
+    },
+    {
+     "index": 3,
+     "type": "f",
+     "shortdesc": "Output1",
+     "longdesc": "Shows a variation of the input"
+    },
+    {
+     "index": 4,
+     "type": "f",
+     "shortdesc": "Output1",
+     "longdesc": "Shows a variation of the input"
     }
    ],
    "source": "addons/material_maker/nodes/variations_greyscale.mmg",
    "generic": true,
+   "generic_size_default": 5,
    "template": {
     "parameters": [
      {
@@ -31378,6 +31630,7 @@
    ],
    "source": "addons/material_maker/nodes/warp.mmg",
    "generic": true,
+   "generic_size_default": 1,
    "template": {
     "parameters": [
      {

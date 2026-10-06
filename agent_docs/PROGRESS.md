@@ -35,8 +35,8 @@
   ("not amazing, but a good start") → continue to Phase 1 (normal path).
 
 ## In progress
-- 1.1: `agent_tools/mmx.py catalog` done (→ `agent_tools/catalog.json`, 411 types; `agent_docs/NODES.md`,
-  ~440 lines, generated). Next: `mmx validate` + tests, docs.
+- 1.1: `mmx catalog` + `mmx validate` + `mmx node` done; tests pass (`agent_tools/test_mmx.py`, 43 examples +
+  broken copies). Remaining: `agent_tools/README.md` (usage + limitations), final PROGRESS update.
 
 ## Blockers
 - None hard. Open question: why `Bricks.repeat`/`rows`/`columns` edits are ignored on export

@@ -295,7 +295,7 @@ BUILTINS = {
                         {"name": "format", "label": "Format", "type": "enum", "values": ["PNG", "JPG", "WEBP", "EXR"], "default": 0},
                         {"name": "suffix", "label": "Filename", "type": "string", "default": "$project"}],
                        [{"name": "in", "type": "rgba"}], []), "Exports its input as an image file.", False),
-    "comment": (_static([], [], []), "Comment box (no ports).", False),
+    "comment": (_static(None, [], []), "Comment box (no ports; free-form fields not checked).", False),
     "comment_line": (_static([], [], []), "Comment line (no ports).", False),
     "webcam": (_static([], [], [{"type": "rgba"}]), "Webcam image.", False),
     "debug": (_static([], [{"name": "in", "type": "rgba"}], []), "Shows generated shader code of its input.", False),
@@ -320,15 +320,16 @@ UNKNOWN = None
 
 
 class Catalog:
-    def __init__(self, entries):
+    def __init__(self, entries, port_types=None):
         self.entries = entries  # type name -> entry dict
+        self.port_types = port_types or {}  # io_types.mmt: name -> {slot_type, converts_to}
 
     @classmethod
     def load(cls, path=CATALOG_PATH):
         if not Path(path).exists():
             return build_catalog()[0]
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(data["types"])
+        return cls(data["types"], data.get("port_types"))
 
     # -- resolution, mirroring MMLoader.create_gen ----------------------------
     def node_defs(self, node, siblings=None):
@@ -358,7 +359,7 @@ class Catalog:
             if fn is None:
                 return {"kind": "builtin", "params": UNKNOWN, "inputs": UNKNOWN, "outputs": UNKNOWN}
             params, inputs, outputs = fn(node)
-            return {"kind": "builtin", "params": [norm_param(p) for p in params],
+            return {"kind": "builtin", "params": None if params is None else [norm_param(p) for p in params],
                     "inputs": [norm_input(p, i) for i, p in enumerate(inputs)],
                     "outputs": [norm_output(p, i) for i, p in enumerate(outputs)]}
         e = self.entries.get(t)
@@ -366,7 +367,8 @@ class Catalog:
             return None
         if e.get("generic"):
             sm = e["template"]
-            params, inputs, outputs = shader_model_defs(sm, _num(node.get("generic_size", 1), 1))
+            size = _num(node.get("generic_size", e.get("generic_size_default", 1)), 1)
+            params, inputs, outputs = shader_model_defs(sm, size)
             if e["kind"] == "material":
                 outputs = []
             return {"kind": e["kind"], "params": params, "inputs": inputs, "outputs": outputs}
@@ -446,13 +448,15 @@ def build_catalog(nodes_dirs=None, library_dir=LIBRARY_DIR):
         if not isinstance(sm, dict) or "nodes" in d:
             continue
         kind = "material" if "preview_shader" in sm else "shader"
-        params, inputs, outputs = shader_model_defs(sm)
+        gsize = _num(d.get("generic_size", 1), 1)  # nodes inherit the .mmg's generic_size unless they set one
+        params, inputs, outputs = shader_model_defs(sm, gsize)
         e = {"type": t, "kind": kind, "label": sm.get("name") or d.get("label") or t,
              "shortdesc": sm.get("shortdesc", ""), "longdesc": sm.get("longdesc", ""),
              "parameters": params, "inputs": inputs, "outputs": [] if kind == "material" else outputs,
              "source": sources[t]}
         if is_generic_model(sm):
             e["generic"] = True
+            e["generic_size_default"] = gsize
             e["template"] = {k: sm.get(k, []) for k in ("parameters", "inputs", "outputs")}
         entries[t] = e
     # Pass 2: graph nodes; resolve in rounds so graphs referencing other graphs get filled in.
@@ -472,7 +476,7 @@ def build_catalog(nodes_dirs=None, library_dir=LIBRARY_DIR):
              "source": "addons/material_maker/engine/nodes/gen_%s.gd" % t}
         if fn is not None:
             params, inputs, outputs = fn({"name": "", "parameters": {}})
-            e["parameters"] = [norm_param(p) for p in params]
+            e["parameters"] = [norm_param(p) for p in params or []]
             e["inputs"] = [norm_input(p, i) for i, p in enumerate(inputs)]
             e["outputs"] = [norm_output(p, i) for i, p in enumerate(outputs)]
         else:
@@ -520,7 +524,15 @@ def build_catalog(nodes_dirs=None, library_dir=LIBRARY_DIR):
             e.setdefault("category", "Material")
         e.setdefault("category", "Builtin" if e["kind"] == "builtin" else "Uncategorized")
 
-    return Catalog(dict(sorted(entries.items()))), {"load_errors": load_errors, "library_graphs": library_graphs}
+    port_types = {}
+    for d in nodes_dirs:
+        f = d / "io_types.mmt"
+        if f.exists():
+            for pt in load_json_lenient(f):
+                port_types[pt["name"]] = {"label": pt.get("label", ""), "slot_type": pt.get("slot_type"),
+                                          "converts_to": [c["type"] for c in pt.get("convert", [])]}
+    rv = Catalog(dict(sorted(entries.items())), port_types)
+    return rv, {"load_errors": load_errors, "library_graphs": library_graphs}
 
 
 def cmd_catalog(args):
@@ -537,6 +549,7 @@ def cmd_catalog(args):
         ],
         "load_errors": info["load_errors"],
         "library_graphs": info["library_graphs"],
+        "port_types": catalog.port_types,
         "types": catalog.entries,
     }
     CATALOG_PATH.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -690,7 +703,7 @@ def node_md(e):
     lines.append(title)
     desc = e.get("longdesc") or e.get("shortdesc") or ""
     if e.get("generic"):
-        desc = (desc + " " if desc else "") + "(generic: '#' items repeat generic_size times)"
+        desc = (desc + " " if desc else "") + "(generic: '#' items repeat generic_size times, default %d; shown at default)" % e.get("generic_size_default", 1)
     if desc:
         lines.append(_short(desc, 220))
     ins = e.get("inputs") or []
@@ -751,8 +764,342 @@ def cmd_node(args):
 # ---------------------------------------------------------------------------
 
 
+# Parameters that older MM versions wrote and the current node defs no longer have. MM ignores them on
+# load, so they're warnings, not errors (found by validating material_maker/examples/*.ptex).
+STALE_PARAMS = {
+    "material": {"ao_light_affect", "normal_scale", "subsurf_scatter_strength", "resolution"},
+    "normal_map": {"amount", "param3", "size"},
+    "combine": {"color", "name"},
+    "warp": {"epsilon"},
+    "tiler": {"select_inputs"},
+    "sdrhombus": {"r"},
+    "sdboolean": {"bevel", "cx", "cy", "h", "r", "w"},
+}
+
+
+def _is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _as_index(v):
+    """Ports/enums are ints; Godot writes them as floats (e.g. 2.0)."""
+    if _is_num(v) and float(v).is_integer():
+        return int(v)
+    return None
+
+
+class Validator:
+    def __init__(self, catalog):
+        self.catalog = catalog
+        self.errors = []
+        self.warnings = []
+
+    def report(self, level, code, path, node, message, hint=None):
+        item = {"code": code, "graph_path": path, "node": node, "message": message}
+        if hint:
+            item["hint"] = hint
+        (self.errors if level == "error" else self.warnings).append(item)
+
+    def err(self, *a, **kw):
+        self.report("error", *a, **kw)
+
+    def warn(self, *a, **kw):
+        self.report("warning", *a, **kw)
+
+    # -- top level -----------------------------------------------------------
+    def validate_file(self, path):
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            self.err("unreadable_file", "/", None, str(e))
+            return
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            self.err("invalid_json", "/", None, "Not valid JSON: %s (line %d, column %d)" % (e.msg, e.lineno, e.colno))
+            return
+        if not isinstance(data, dict):
+            self.err("bad_structure", "/", None, "Top level must be a JSON object with 'nodes' and 'connections'.")
+            return
+        self.check_graph(data, "/")
+
+    # -- graphs --------------------------------------------------------------
+    def check_graph(self, graph, path):
+        nodes = graph.get("nodes")
+        conns = graph.get("connections", [])
+        if not isinstance(nodes, list):
+            self.err("bad_structure", path, None, "'nodes' must be a list.")
+            return
+        if not isinstance(conns, list):
+            self.err("bad_structure", path, None, "'connections' must be a list.")
+            conns = []
+        siblings = {}
+        for i, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                self.err("bad_structure", path, None, "nodes[%d] is not an object." % i)
+                continue
+            name = n.get("name")
+            if not isinstance(name, str) or not name:
+                self.err("missing_name", path, None, "nodes[%d] has no 'name'." % i)
+                continue
+            if name in siblings:
+                self.err("duplicate_node_name", path, name, "Node name %r is used more than once in this graph." % name,
+                         "Node names must be unique within a graph; connections refer to nodes by name.")
+            siblings[name] = n
+        defs = {}
+        for name, n in siblings.items():
+            defs[name] = self.check_node(n, siblings, path)
+        for name, n in siblings.items():
+            if isinstance(n.get("nodes"), list):
+                self.check_graph(n, path.rstrip("/") + "/" + name)
+        self.check_connections(conns, siblings, defs, path)
+        for name, n in siblings.items():
+            if defs.get(name) and defs[name]["kind"] == "remote":
+                self.check_remote_overrides(n, siblings, graph, path)
+
+    def check_node(self, node, siblings, path):
+        name = node["name"]
+        t = node.get("type")
+        content_typed = any(k in node for k in ("shader_model", "nodes", "connections", "widgets", "is_brush",
+                                                "sdf_scene", "model_data"))
+        if not isinstance(t, str) and not content_typed:
+            self.err("missing_type", path, name, "Node %r has no 'type'." % name)
+            return None
+        if "generic_size" in node and (_as_index(node["generic_size"]) is None or node["generic_size"] < 1):
+            self.err("bad_generic_size", path, name, "'generic_size' must be an integer >= 1.")
+        d = self.catalog.node_defs(node, siblings)
+        if d is None:
+            if t.startswith("website:"):
+                self.warn("unresolved_type", path, name, "Type %r is downloaded from the MM website at load time; "
+                          "not checked offline." % t)
+            else:
+                close = difflib.get_close_matches(t, [k for k, e in self.catalog.entries.items()
+                                                      if e["kind"] != "builtin" or e.get("parameters")], n=5, cutoff=0.6)
+                self.err("unknown_type", path, name, "Unknown node type %r." % t,
+                         ("Did you mean: %s? " % ", ".join(close) if close else "") +
+                         "See agent_docs/NODES.md or agent_tools/catalog.json for valid types.")
+            return None
+        params = node.get("parameters", {})
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            self.err("bad_structure", path, name, "'parameters' must be an object.")
+        elif d["params"] is not None:
+            self.check_params(node, params, d["params"], path)
+        if d["kind"] == "remote":
+            self.check_remote(node, siblings, path)
+        return d
+
+    # -- parameters ----------------------------------------------------------
+    def check_params(self, node, values, pdefs, path):
+        name = node["name"]
+        by_name = {p["name"]: p for p in pdefs}
+        for k, v in values.items():
+            p = by_name.get(k)
+            if p is None:
+                if k in STALE_PARAMS.get(node.get("type"), ()) or isinstance(node.get("shader_model"), dict):
+                    self.warn("ignored_parameter", path, name, "%s.%s is not a parameter of %s; MM ignores it "
+                              "(left over from an older version or an edited inline shader)." % (name, k, node.get("type")))
+                    continue
+                close = difflib.get_close_matches(k, by_name.keys(), n=3, cutoff=0.6)
+                valid = ", ".join(sorted(by_name)) or "(none)"
+                self.err("unknown_parameter", path, name, "Node %r (%s) has no parameter %r." % (name, node.get("type"), k),
+                         ("Did you mean: %s? " % ", ".join(close) if close else "") + "Valid: " + _short(valid, 300))
+                continue
+            self.check_value(node, k, v, p, path)
+
+    def check_value(self, node, k, v, p, path):
+        name = node["name"]
+        t = p.get("type")
+        where = "%s.%s" % (name, k)
+
+        def bad(expected):
+            self.err("bad_parameter_type", path, name, "%s should be %s, got %s." % (where, expected, json.dumps(v)[:80]),
+                     _param_hint(p))
+
+        if t == "float":
+            if isinstance(v, str):
+                return  # expression, e.g. "$time" or "2*$param"; not evaluated
+            if not _is_num(v):
+                return bad("a number (or an expression string)")
+            lo, hi = p.get("min"), p.get("max")
+            if _is_num(lo) and _is_num(hi) and not (lo <= v <= hi):
+                self.warn("parameter_out_of_range", path, name, "%s = %s is outside the slider range %s..%s." %
+                          (where, _fmt_num(v), _fmt_num(lo), _fmt_num(hi)), "Allowed, but usually a mistake.")
+        elif t == "enum":
+            i = _as_index(v)
+            n = len(p.get("values", []))
+            if i is None:
+                return bad("an integer enum index")
+            if n and not (0 <= i < n):
+                self.err("bad_enum_value", path, name, "%s = %d is not a valid index (0..%d)." % (where, i, n - 1),
+                         _param_hint(p))
+        elif t == "boolean":
+            if not (isinstance(v, bool) or v in (0, 1)):
+                return bad("true or false")
+        elif t == "size":
+            i = _as_index(v)
+            if i is None:
+                return bad("an integer size exponent (log2 pixels, e.g. 10 = 1024)")
+            lo, hi = p.get("first", 4), p.get("last", 13)
+            if not (lo <= i <= hi):
+                self.warn("parameter_out_of_range", path, name, "%s = %d is outside %d..%d (log2 pixels)." %
+                          (where, i, lo, hi))
+        elif t == "color":
+            if isinstance(v, dict):
+                if not all(_is_num(v.get(c)) for c in "rgb"):
+                    return bad('a color {"type":"Color","r":..,"g":..,"b":..,"a":..}')
+            elif not isinstance(v, str):
+                return bad('a color {"type":"Color","r":..,"g":..,"b":..,"a":..}')
+        elif t == "gradient":
+            if isinstance(v, dict):
+                pts = v.get("points")
+                if not isinstance(pts, list) or not all(isinstance(q, dict) and _is_num(q.get("pos")) for q in pts):
+                    return bad('a gradient {"type":"Gradient","interpolation":1,"points":[{"pos":0,"r":..,"g":..,"b":..,"a":..}]}')
+            elif not isinstance(v, list):
+                return bad("a gradient object")
+        elif t in ("curve", "polygon", "polyline", "splines", "pixels", "lattice"):
+            if not isinstance(v, (dict, list)):
+                return bad("a %s object" % t)
+        elif t in ("string", "file", "image_path"):
+            if not isinstance(v, str):
+                return bad("a string")
+
+    # -- remote widgets ------------------------------------------------------
+    def check_remote(self, node, siblings, path):
+        name = node["name"]
+        for w in node.get("widgets", []) or []:
+            links = list(w.get("linked_widgets") or [])
+            for conf in (w.get("configurations") or {}).values():
+                links += [c for c in conf if isinstance(c, dict)]
+            for l in links:
+                target = siblings.get(l.get("node"))
+                if target is None:
+                    self.err("bad_linked_widget", path, name, "Widget %r links to missing node %r." %
+                             (w.get("name"), l.get("node")))
+                    continue
+                td = self.catalog.node_defs(target, siblings) if target is not node else None
+                if td and td["params"] is not None and l.get("widget") not in {p["name"] for p in td["params"]}:
+                    self.err("bad_linked_widget", path, name, "Widget %r links to %s.%s, which is not a parameter." %
+                             (w.get("name"), l.get("node"), l.get("widget")))
+
+    def check_remote_overrides(self, node, siblings, graph, path):
+        """Remote widgets push their value onto linked parameters on load, so editing a linked
+        parameter directly has no effect (Phase 0: Bricks.repeat edits were silently ignored)."""
+        values = dict(node.get("parameters") or {})
+        if node["name"] == "gen_parameters" and isinstance(graph.get("parameters"), dict):
+            values.update(graph["parameters"])  # the subgraph node's own paramN values win
+        gname = path.rstrip("/").rsplit("/", 1)[-1] or "(top level)"
+        for w in node.get("widgets", []) or []:
+            wname = w.get("name")
+            if wname not in values:
+                continue
+            v = values[wname]
+            if w.get("type") == "linked_control":
+                targets = [(l, v) for l in w.get("linked_widgets") or []]
+                why = "%s = %s" % (wname, json.dumps(v))
+            elif w.get("type") == "config_control":
+                keys = sorted((w.get("configurations") or {}).keys())
+                i = (1 if v else 0) if isinstance(v, bool) else _as_index(v)
+                if i is None or not (0 <= i < len(keys)):
+                    continue
+                targets = [(l, l.get("value")) for l in w["configurations"][keys[i]]]
+                why = "%s = %d (%r)" % (wname, i, keys[i])
+            else:
+                continue
+            for l, expected in targets:
+                target = siblings.get(l.get("node"))
+                if target is None or not isinstance(target.get("parameters"), dict):
+                    continue
+                actual = target["parameters"].get(l.get("widget"))
+                if actual is None or _same_value(actual, expected):
+                    continue
+                where = "on the subgraph node (%s.%s)" % (gname, wname) if node["name"] == "gen_parameters" \
+                    else "on remote %r" % node["name"]
+                self.warn("overridden_parameter", path, l.get("node"),
+                          "%s.%s = %s will be overwritten with %s by remote %r widget %s (%s)." %
+                          (l.get("node"), l.get("widget"), json.dumps(actual)[:60], json.dumps(expected)[:60],
+                           node["name"], wname, why),
+                          "Edit the remote parameter instead, %s." % where)
+
+    # -- connections ---------------------------------------------------------
+    def check_connections(self, conns, siblings, defs, path):
+        fed = {}
+        for i, c in enumerate(conns):
+            if not isinstance(c, dict) or not all(k in c for k in ("from", "from_port", "to", "to_port")):
+                self.err("bad_connection", path, None, "connections[%d] must have from, from_port, to, to_port." % i)
+                continue
+            label = "%s:%s -> %s:%s" % (c["from"], c["from_port"], c["to"], c["to_port"])
+            fp, tp = _as_index(c["from_port"]), _as_index(c["to_port"])
+            if fp is None or tp is None or fp < 0 or tp < 0:
+                self.err("bad_connection", path, None, "Connection %s: ports must be integers >= 0." % label)
+                continue
+            out_t = in_t = None
+            ok = True
+            for end, port, key, word in ((c["from"], fp, "outputs", "output"), (c["to"], tp, "inputs", "input")):
+                if end not in siblings:
+                    close = difflib.get_close_matches(str(end), siblings.keys(), n=3, cutoff=0.6)
+                    self.err("unknown_node", path, None, "Connection %s refers to missing node %r." % (label, end),
+                             "Did you mean: %s?" % ", ".join(close) if close else None)
+                    ok = False
+                    continue
+                d = defs.get(end)
+                if d is None or d[key] is None:
+                    continue  # unknown type (already reported) or dynamic ports
+                ports = d[key]
+                if port >= len(ports):
+                    listing = ", ".join("%d %s%s" % (p["index"], (p.get("name") + " ") if p.get("name") else "",
+                                                     p.get("type", "")) for p in ports) or "none"
+                    self.err("bad_%s_port" % word, path, end, "Connection %s: %r (%s) has no %s port %d." %
+                             (label, end, siblings[end].get("type"), word, port), "%ss: %s" % (word.capitalize(), listing))
+                    ok = False
+                    continue
+                if word == "output":
+                    out_t = ports[port].get("type")
+                else:
+                    in_t = ports[port].get("type")
+            if not ok:
+                continue
+            key = (c["to"], tp)
+            if key in fed:
+                self.err("input_multiply_connected", path, c["to"], "Input %s:%d is fed by both %s and %s:%s." %
+                         (c["to"], tp, fed[key], c["from"], fp), "An input takes exactly one connection; remove one.")
+            else:
+                fed[key] = "%s:%s" % (c["from"], fp)
+            if out_t and in_t and not self.compatible(out_t, in_t):
+                self.err("port_type_mismatch", path, c["to"], "Connection %s connects a %s output to a %s input." % (label, out_t, in_t),
+                         "f, rgb and rgba convert freely; sdf2d, sdf3d, tex3d, fill etc. only connect to their own kind.")
+
+    def compatible(self, a, b):
+        if a == b or "any" in (a, b):
+            return True
+        pa, pb = self.catalog.port_types.get(a), self.catalog.port_types.get(b)
+        if pa is None or pb is None:
+            return True  # unknown port type: don't guess
+        return b in pa["converts_to"] or pa["slot_type"] == pb["slot_type"]
+
+
+def _same_value(a, b):
+    if _is_num(a) and _is_num(b):
+        return abs(a - b) < 1e-6
+    return a == b
+
+
+def _param_hint(p):
+    s = fmt_param(p)
+    return "Expected: " + s
+
+
+def validate_file(path, catalog=None):
+    v = Validator(catalog or Catalog.load())
+    v.validate_file(path)
+    return {"ok": not v.errors, "errors": v.errors, "warnings": v.warnings}
+
+
 def cmd_validate(args):
-    return 0
+    result = validate_file(args.ptex)
+    print(json.dumps(result, indent=1, ensure_ascii=False))
+    return 0 if result["ok"] else 1
 
 
 def main(argv=None):
