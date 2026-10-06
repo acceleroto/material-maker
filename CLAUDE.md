@@ -34,6 +34,10 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 - If the app quits instantly with no output, add `steam_appid.txt` containing `4110830`
   next to the executable (release) or at the repo root (source).
 - Iteration outputs go in `agent_runs/` (gitignored).
+- Run exports via the Terminal panel (`run_in_terminal`), NOT the Bash tool: launched from
+  Bash the app hangs forever in `CAMetalLayer nextDrawable` with no output (see
+  `agent_docs/phase0_notes.md`). `mkdir -p` the `-o` dir first: on a missing dir the app
+  errors and does not quit. Verify edits took effect by md5-diffing outputs against a baseline.
 
 ## Paths on this machine
 - Repo:              `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`
