@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 2.1 (complete); next 3.1
+**Current session:** 3.1 (in progress)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -96,7 +96,12 @@
   `--size 256`: ~2 s. Not exercised: the additional-export (export node) branch — no example uses one.
 
 ## In progress
-- None.
+- 3.1 (agent, 2026-10-06), plan: `~/.claude/plans/cheeky-wobbling-karp.md` (steps: list → describe → validate →
+  mmx catalog → mmx validate). Done so far: `cli_inspect.gd` (repo root; `parse_args.gd` delegates to it when
+  `--list-nodes`/`--describe-node`/`--validate` is given). `--list-nodes --json` (items from the add-node menu's
+  library manager + all 411 types), `--describe-node <type>...|--all --json` (instantiated generators; whole set in
+  ~2 s). GUT `test/test_cli_inspect.gd` (run with `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`;
+  `-gdir=res://test` also runs upstream doc tests that already fail).
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).

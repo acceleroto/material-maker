@@ -287,7 +287,11 @@ func finish(options : Dictionary, results : Array[Dictionary]) -> void:
 func _ready():
 	RenderingServer.set_default_clear_color(Color.BLACK)
 	var args : PackedStringArray = OS.get_cmdline_args()
-	if ("--export" in args) or ("--export-material" in args):
+	if ("--list-nodes" in args) or ("--describe-node" in args) or ("--validate" in args):
+		var inspect : Node = preload("res://cli_inspect.gd").new()
+		add_child(inspect)
+		await inspect.run(self, args)
+	elif ("--export" in args) or ("--export-material" in args):
 		print("Exporting...")
 		var options : Dictionary = parse_export_args(args)
 		for e : String in options.errors:
