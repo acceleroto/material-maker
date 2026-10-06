@@ -7,6 +7,11 @@ Subcommands:
   validate  Structurally check a .ptex file; prints {"ok", "errors", "warnings"} JSON,
             exit code 0 (ok) or 1 (errors).
   node      Print one catalog entry as JSON.
+  export    Validate, then export a .ptex with the Material Maker binary (config: mmx.toml);
+            JSON summary of files written, exit 0 (ok) / 1 (validation/plan) / 2 (export failed).
+  sheet     Labeled contact-sheet PNG of an export dir (needs Pillow, agent_tools/.venv).
+  run       One iteration: agent_runs/<run>/iter_NNN/ with ptex copy, out/, sheet.png.
+  wait      Poll for the result of an export/run started elsewhere (e.g. the Terminal panel).
 
 Node type resolution mirrors MMLoader.create_gen (addons/material_maker/engine/loader.gd).
 See agent_tools/README.md for limitations.
@@ -1244,6 +1249,10 @@ def _write_json(path, data):
     tmp.replace(path)  # atomic, so `mmx wait` never reads half a file
 
 
+# Printed on every successful run (see agent_docs/phase0_notes.md).
+HARMLESS_LOG = ("resources still in use at exit", "ObjectDB instances were leaked", "user://export_targets")
+
+
 def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=False, skip_validate=False):
     """Validate, export with the MM binary, check outputs. Returns a JSON-able summary
     (also written to <out_dir>/mmx_result.json)."""
@@ -1306,7 +1315,8 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
 
     log_text = log_path.read_text(errors="replace")
     res["log_errors"] = [l.strip() for l in log_text.splitlines()
-                         if re.search(r"\bERROR\b|Error in expression|SCRIPT ERROR|Failed", l)][:20]
+                         if re.search(r"\bERROR\b|Error in expression|SCRIPT ERROR|Failed", l)
+                         and not any(h in l for h in HARMLESS_LOG)][:20]
     written, missing = [], []
     for f in exp["required"] + exp["optional"]:
         p = Path(f)
