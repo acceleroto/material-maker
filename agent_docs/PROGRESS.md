@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 1.1 (complete)
+**Current session:** 1.2 (complete)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -45,6 +45,20 @@
   `gen_parameters.param0` config_control (Pattern), which overwrites them on load; `validate` now warns
   `overridden_parameter` for this.
 
+- 1.2 (agent, 2026-10-05): `mmx export/sheet/run/wait` + `agent_tools/mmx.toml` (mode/target/timeout/binary;
+  `source` mode stubbed for Phase 2). `export` validates first, predicts the expected files from the Material
+  node's export template (`$(connected:x_tex)` conditions), deletes old outputs (MM silently skips existing
+  `.mat`/`.meta` in CLI mode), runs with timeout + `export.log`, writes/prints `mmx_result.json`. `sheet`:
+  lit + lit-tiled previews, split packed maps (Unity metal_smoothness, Godot orm), min/mean/max labels.
+  `run` → `agent_runs/<run>/iter_NNN/` (ptex copy, out/, sheet.png, note.md). `wait` polls results for the
+  Terminal-panel fallback. Pillow lives in gitignored `agent_tools/.venv` (mmx re-execs into it).
+  Tests: 19 pass (`agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`), export paths tested
+  with a fake MM binary (ok / missing file / hang→timeout / validation refusal).
+  **Finding: the Phase-0 Bash-tool hang no longer reproduces** (6/6 exports from Bash, ~5 s, incl. a plain
+  direct launch). CLAUDE.md now says: use `mmx run` from Bash; on `error: timeout`, fall back to
+  `run_in_terminal` + `mmx wait`. Real runs: `agent_runs/s1.2/iter_001` (bricks, via Terminal panel),
+  `iter_002` (improved_brick, via Bash).
+
 ## In progress
 - None.
 
@@ -52,11 +66,9 @@
 - None. Exports must run via `run_in_terminal` (Bash-launched exports hang).
 
 ## Next step
-- Session 1.2 per ROADMAP.md "### 1.2": extend `agent_tools/mmx.py` with `mmx export <ptex> --target
-  "Unity/URP" --out <dir>` (run `validate` first and refuse on errors; absolute paths; `mkdir -p` the out
-  dir; timeout; log stdout/stderr; detect failure by expected output files; JSON summary), `mmx sheet <dir>`
-  (labeled contact sheet; reuse ideas from `agent_tools/proto_0.3/sheet.py`, but Pillow only, no numpy),
-  `mmx run <ptex> --run-name X` (→ `agent_runs/X/iter_NNN/`), and `agent_tools/mmx.toml` for binary paths
-  (Python 3.11+ `tomllib`). Remember: the MM binary hangs when launched from the Bash tool; design
-  `export` so it can be started via `run_in_terminal` (e.g. write a DONE marker / JSON result file that
-  Bash can poll, as `proto_0.3/export.sh` does). Add short tests. Update PROGRESS.md (next: 1.3).
+- Session 1.3 per ROADMAP.md "### 1.3": create `.claude/skills/material-maker/SKILL.md` (+ root `AGENTS.md`)
+  with the iteration workflow built on `mmx validate` → `mmx run <ptex> --run-name X --note "..."` → view
+  `iter_NNN/sheet.png` → critique → edit 1–2 things (cap 8 iterations); add `agent_docs/examples_annotated.md`
+  (4 example graphs explained); then the 3-request end-to-end test from the roadmap. Read
+  `agent_tools/README.md` ("Export, sheet, run") and `agent_docs/phase0_notes.md` pitfalls first. If an
+  export times out, use the Terminal-panel fallback (`run_in_terminal` + `mmx wait --run-name X`).

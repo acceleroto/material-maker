@@ -128,3 +128,9 @@ Other observations:
 - `Bricks.repeat`/`rows`/`columns` edits had no effect because the `graph` subgraph's `gen_parameters`
   remote has a `config_control` (param0, "Pattern") whose configurations set those values on load.
   Change `graph.param0` instead. `mmx validate` reports this as `overridden_parameter`.
+
+## Session 1.2 follow-up: Bash-tool hang
+Could not reproduce on 2026-10-05: `mmx export` (Popen, new session, stdin=/dev/null), a plain
+`subprocess.run`, and a direct shell launch from Claude's Bash tool all finished in ~5–7 s (6/6).
+Cause of the Phase-0 hang still unknown (display state? first launch/permissions?). `mmx` kills a hung
+export after `timeout` (mmx.toml) and hints at the Terminal-panel fallback (`mmx wait`).

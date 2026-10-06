@@ -34,10 +34,12 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 - If the app quits instantly with no output, add `steam_appid.txt` containing `4110830`
   next to the executable (release) or at the repo root (source).
 - Iteration outputs go in `agent_runs/` (gitignored).
-- Run exports via the Terminal panel (`run_in_terminal`), NOT the Bash tool: launched from
-  Bash the app hangs forever in `CAMetalLayer nextDrawable` with no output (see
-  `agent_docs/phase0_notes.md`). `mkdir -p` the `-o` dir first: on a missing dir the app
-  errors and does not quit. Verify edits took effect by md5-diffing outputs against a baseline.
+- Export with `python3 agent_tools/mmx.py run <ptex> --run-name X` (or `mmx export`); it handles
+  absolute paths, `mkdir -p`, timeout, logging and output checks. In Phase 0 the app hung forever
+  when launched from the Bash tool (`CAMetalLayer nextDrawable`); since Session 1.2 it works from
+  Bash. If `mmx` reports `error: timeout`, launch it via the Terminal panel (`run_in_terminal`) and
+  poll with `mmx wait --run-name X` from Bash. Verify edits took effect by md5-diffing outputs
+  against a baseline.
 
 ## Paths on this machine
 - Repo:              `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`
@@ -52,6 +54,8 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
   `python3 agent_tools/mmx.py node <type>`.
 - Run `python3 agent_tools/mmx.py validate <file.ptex>` after every `.ptex` edit, before exporting.
   See `agent_tools/README.md` for error codes and limitations.
+- `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
+  `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).
 
 ## Code style
 - GDScript: follow upstream style and the Godot style guide; explicit static typing
