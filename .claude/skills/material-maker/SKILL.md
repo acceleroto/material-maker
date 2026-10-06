@@ -44,12 +44,13 @@ Reference, read on demand (don't inline them into your context all at once):
 6. **Look at `iter_NNN/sheet.png`** (Read the image) and **write `iter_NNN/critique.md`**:
    for each trait from step 1, matches / doesn't, plus the single biggest gap and what you'll
    change next. Be concrete ("cracks too thin: ~1 px at 2048"), not vague ("needs work").
-   **Something didn't show up or looks wrong and you can't tell why?** Do a debug export (doesn't count as an
-   iteration): copy the ptex to `agent_runs/<run>/debug/dbg.ptex`, wire the suspect node(s) straight into
-   Material albedo (in 0) / roughness (in 2) / metallic (in 1), then
-   `python3 agent_tools/mmx.py export agent_runs/<run>/debug/dbg.ptex --out agent_runs/<run>/debug/out` and
-   `python3 agent_tools/mmx.py sheet agent_runs/<run>/debug/out`. This is the stand-in for a per-node preview
-   (it found two missing wires and a scale mistake in Session 1.3).
+   **Something didn't show up or looks wrong and you can't tell why?** Render the suspect stages
+   (doesn't count as an iteration): `python3 agent_tools/mmx.py node-preview <ptex> --node <name> [--port N]`
+   (`a/b` for a node inside sub-graph `a`; ~2 s each) and Read the PNG it prints. Walk upstream from the
+   Material input that looks wrong until a stage looks wrong; the JSON lists the node's outputs if you need
+   another port. Normal-map nodes show MM's internal format (not the exported Unity normal colours).
+   If several nodes must be judged together, a debug export still works: copy the ptex to
+   `agent_runs/<run>/debug/dbg.ptex`, wire suspects into Material albedo (in 0), then `mmx export` + `mmx sheet`.
 7. **Decide**: all traits OK → stop and report. Otherwise go to 3 and change the 1–2 things that
    close the biggest gap. If an iteration made it worse, revert to the previous ptex rather than
    stacking fixes on a broken state.

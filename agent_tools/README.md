@@ -18,6 +18,7 @@ python3 agent_tools/mmx.py validate <file.ptex> [--fast] [--timeout S]
 python3 agent_tools/mmx.py node <type>        # one type's params/ports as JSON
 python3 agent_tools/mmx.py export <file.ptex> --out <dir> [--target "Unity/URP"] [--timeout S] [--keep-meta]
 python3 agent_tools/mmx.py sheet <dir> [--out sheet.png]
+python3 agent_tools/mmx.py node-preview <ptex> --node NAME [--port N] [--size 512] [--out x.png]
 python3 agent_tools/mmx.py run <file.ptex> --run-name NAME [--note "what changed"]
 python3 agent_tools/mmx.py wait (<dir> | --run-name NAME) [--timeout S]
 agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain python3 skips the sheet test
@@ -37,6 +38,14 @@ agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain py
   where the Python parse disagrees with the engine (2026-10-06: only `comment_line`, `webcam`).
   `--static` skips the engine; `--nodes-dir DIR` (static only) adds a `.mmg` dir that overrides repo
   defs (e.g. the release app's `nodes/`). Re-run after changing node definitions; commit both outputs.
+- **node-preview** (Session 4.1): renders one output of one node to a PNG with the engine's
+  `--render-output` (~2 s, ~3.5 s for graphs with buffers; source mode only). `--node` is the node name,
+  `a/b` for node `b` inside sub-graph node `a`; `--port` the output index (default 0); `--size` default
+  512. Default file: `agent_runs/node_preview/<ptex stem>/<node>_p<port>.png` (`a/b` → `a__b`); a stale
+  file is deleted first. Prints `{"ok", "file", "node", "port", "size", "type" (the .ptex type),
+  "output_type", "output_label", "outputs" (every output: index/type/label, to pick a port), "seconds",
+  "errors", "warnings"}`; exit 0/1. Unknown node → the error lists the nodes with outputs at that level.
+  Use it to debug a graph stage by stage instead of a debug export.
 - **validate**: Python checks first (instant). If they pass, runs the engine's `--validate` (~2 s for
   bricks: loads the file with `mm_loader`, checks types and connections against the instantiated
   generators, compiles every output's shader) and merges its findings (`"source": "engine"`).
@@ -79,12 +88,13 @@ ports/params by the node's `generic_size`, defaulting to the `.mmg`'s own `gener
 `parse_args.gd` hands these to `cli_inspect.gd` (source mode; not in the release app). Add `--json` for
 one summary line `{"mm_cli": 1, "mode", "ok", "exit_code", "errors", "warnings", ...}` (stdout also has
 Godot noise; take the last line starting with `{"`). Exit codes: 0 ok, 1 bad arguments, 2 load failure /
-unknown type, 4 validation errors.
+unknown type, 3 render failure (`--render-output`), 4 validation errors.
 
 ```
 <Godot> --path <repo> --list-nodes --json                       # items (add-node menu) + types
 <Godot> --path <repo> --describe-node bricks3 blend2 --json    # or --describe-node --all (~2 s)
 <Godot> --path <repo> --validate <abs a.ptex> [<abs b.ptex>...] --json
+<Godot> --path <repo> --render-output <abs a.ptex> --node graph/Bricks [--port 0] [--size 512] -o <abs x.png> --json
 ```
 
 - `--list-nodes`: `items` = every add-node menu entry, read through the editor's own library manager
@@ -99,6 +109,16 @@ unknown type, 4 validation errors.
   `MMComputeShader` (nothing is rendered). Each faulty node is reported once. All 43 examples: ~50 s in
   one launch; `doc_tools.ptex` (MM's doc helper graph) really has 2 GLSL errors. Needs a GPU context:
   under `--headless` the shader check is skipped with a warning.
+- `--render-output` (Session 4.1): loads the file, waits for buffers like the exporter, then renders the
+  output with `MMGenBase.render_output_to_texture` (the compute-shader path the exporter and the 2D
+  preview use; the legacy `renderer.gd` SubViewport path is deprecated) and saves it (`png`/`exr`/`jpg`/
+  `webp`; parent dirs created). `--size` 16..8192 (default 512). Summary adds `input`, `node`, `port`,
+  `size`, `file`, `type`, `output_type`, `output_label`, `outputs`. Greyscale (`f`) outputs come out grey
+  RGBA; sdf/other types use the type's preview code (as in the editor). Pixels match the export
+  byte-for-byte where the target writes the value unchanged (bricks albedo/AO, stylized_wall albedo);
+  **not** for normals: a `normal_map` node's raw output is MM's internal format (blue ≈ 0.1, red flipped),
+  the target converts it when exporting. Exit 1 for unknown node / port out of range / node without
+  outputs (Material, comment), 2 load failure, 3 render or write failure.
 - GUT: `<Godot> --headless --path <repo> -s addons/gut/gut_cmdln.gd -gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd -gexit`.
 
 ### Limitations

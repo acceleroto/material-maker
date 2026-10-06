@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 4.1 (in progress)
+**Current session:** 4.1 (complete); next 4.2
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -116,15 +116,37 @@
   `_ready`, so describe/validate need a GPU context (no `--headless`); structural errors cascade into shader
   errors, so the compile check only runs on otherwise-clean graphs.
 
+- 4.1 (agent, 2026-10-06): engine `--render-output <abs ptex> --node <name|a/b> [--port n] [--size px] -o <abs png> [--json]`
+  in `cli_inspect.gd` (`parse_args.gd` only gained the dispatch condition). Renders with
+  `MMGenBase.render_output_to_texture` + `MMTexture.save_to_file`, i.e. the compute-shader path the exporter and
+  the 2D preview use, **not** the roadmap's `renderer.gd`/`multi_renderer.gd` (legacy SubViewport path; its
+  `render()` is marked deprecated). Waits for buffers like `export_material`; waits up to 5 s for
+  `mm_renderer.rendering_device` (created asynchronously at startup; without the wait the first try failed).
+  Summary: `type` (the .ptex type, from `gen.model`), `output_type`, `output_label`, `outputs` (all ports).
+  Exit 1 unknown node (lists nodes with outputs at that level) / bad port / Material or comment, 2 load, 3 render.
+  `mmx node-preview <ptex> --node N [--port] [--size 512] [--out]` → default
+  `agent_runs/node_preview/<stem>/<node>_p<port>.png`, deletes stale file, ok only if the PNG exists.
+  Tests: GUT 38 pass (5 new parser tests); mmx 50 pass (5 fake-engine + 1 real-engine render test).
+  Real run (11 renders, 2 graphs, ~2 s each, ~3.5 s with buffers): bricks `Perlin` (f), `graph/Bricks` (inside
+  a sub-graph), `blend_1`, `blend_0`, `colorize_3`, `normal_map_2`; stylized_wall `bricks` (ports 0 and 1), `fbm`,
+  `buffer`, `graph_5` (downstream of the buffer), `blend_5`. Contact images `agent_runs/4.1/{bricks,wall}_contact.png`.
+  **Byte-identical to `mmx export --size 512`**: bricks blend_0 = `_albedo`, colorize_3 = `_occlusion`;
+  stylized_wall blend_5 = `_albedo`. **Finding:** a `normal_map` node's raw output is MM's internal format
+  (blue ≈ 27/255, red flipped vs the Unity export, which the target converts) — documented in SKILL/README.
+  stylized_wall's `bricks` port 0 is all white (mortar 0, bevel 0; the graph only uses port 1) — correct.
+  Docs: `agent_tools/README.md`, CLAUDE.md, SKILL.md + AGENTS.md (debug step now uses node-preview first).
+
 ## In progress
-- 4.1: `--render-output` (cli_inspect.gd) + `mmx node-preview` done and tested; docs pending.
+- None.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 4.1 per ROADMAP.md "### 4.1" (plan mode first): render any node's output (preview rendering).
-  Useful from 3.1: `cli_inspect.gd` shows how to load a .ptex and walk generators/outputs outside the editor
-  (`compile_output` mirrors `MMGenBase.render_output_to_texture` minus the render), and parse_args.gd's
-  `--json`/exit-code conventions. Tests: GUT `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
-  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.
+- Session 4.2 per ROADMAP.md "### 4.2" (plan mode first): `--render-preview <ptex> --mesh sphere|plane|cube
+  --env <name> --size <px> -o <png>` (material on a mesh, fixed camera/lighting; see `material_maker/meshes`,
+  `material_maker/environments`). Useful from 4.1: `cli_inspect.gd` `render_output_file()` (load, wait for
+  RD + buffers, render, save; exit codes) and `mmx node_preview()` (run_engine wrapper, stale-file removal).
+  Material preview needs the Material node's 3D shader (`MMGenMaterial` preview textures, `gen_material.gd`
+  ~l.110-210) and a real 3D viewport (not the compute path). Tests: GUT
+  `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`, `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.
