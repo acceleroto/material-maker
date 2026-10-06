@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 4.3 (complete); next 5.1
+**Current session:** 5.1 (in progress)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -170,7 +170,10 @@
   spreads the angle. Open ideas: zoom/crop helper for fine detail, `parameter_out_of_range` too strict (voronoi stretch).
 
 ## In progress
-- None.
+- 5.1: `cli_serve.gd` (`--serve` JSON-RPC on stdin/stdout, all 15 methods) written and smoke-tested (load, get_graph,
+  render_output byte-identical to the CLI, parse/unknown-method errors, shutdown, stdin EOF quits). cli_inspect/cli_preview
+  refactored into load + `validate_gen`/`render_node`/`render_gen` (GUT 41 + mmx 57 pass). Next: test edit methods +
+  staleness after set_param, `agent_tools/mm_client.py`, tests, bench, docs.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).

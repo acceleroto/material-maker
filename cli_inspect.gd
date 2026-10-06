@@ -350,9 +350,12 @@ static func generator_shortdesc(data : Dictionary) -> String:
 			return desc_source[k]
 	return ""
 
-func list_nodes() -> Dictionary:
-	var manager : Node = create_library_manager()
-	await manager.libraries_changed
+# manager: an already loaded library manager (kept by the caller, e.g. --serve), or null
+func list_nodes(manager : Node = null) -> Dictionary:
+	var own_manager : bool = (manager == null)
+	if own_manager:
+		manager = create_library_manager()
+		await manager.libraries_changed
 	var items : Array[Dictionary] = []
 	var categories : Dictionary = {}
 	for li in manager.get_child_count():
@@ -401,7 +404,8 @@ func list_nodes() -> Dictionary:
 			builtin = BUILTIN_TYPES.has(t),
 			shortdesc = generator_shortdesc(data)
 		})
-	manager.queue_free()
+	if own_manager:
+		manager.queue_free()
 	return { items = items, types = types }
 
 # --describe-node
@@ -510,6 +514,13 @@ func validate_file(path : String) -> Dictionary:
 		return rv
 	rv.load_failed = false
 	add_child(gen)
+	await validate_gen(gen, data, rv)
+	remove_child(gen)
+	gen.free()
+	return rv
+
+# Checks a loaded generator (in the tree) against its data (the file contents, or gen.serialize())
+func validate_gen(gen : MMGenBase, data : Dictionary, rv : Dictionary) -> void:
 	if gen is MMGenGraph:
 		check_graph(gen, data, "/", rv)
 	if rv.errors.is_empty():
@@ -518,9 +529,6 @@ func validate_file(path : String) -> Dictionary:
 		# Broken nodes or connections make downstream shaders fail too: fix those first
 		rv.warnings.append(issue("shader_check_skipped", "/", "", "shaders were not compiled because the graph has errors"))
 	rv.ok = rv.errors.is_empty()
-	remove_child(gen)
-	gen.free()
-	return rv
 
 static func port_types(defs : Array) -> Array:
 	var rv : Array = []
@@ -705,12 +713,20 @@ func render_output_file(path : String, node_path : String, port : int, size : in
 		host.show_error("Cannot load %s (%s)" % [ path, "not a valid material file" if FileAccess.file_exists(path) else "no such file" ], EXIT_LOAD)
 		return rv
 	add_child(gen)
+	await render_node(gen, node_path, port, size, output, rv)
+	remove_child(gen)
+	gen.free()
+	return rv
+
+# Renders one output of a node of a loaded generator (in the tree); fills rv (file, type, outputs...)
+func render_node(gen : MMGenBase, node_path : String, port : int, size : int, output : String, rv : Dictionary) -> void:
 	var node : Node = gen.get_node_or_null(NodePath(node_path))
 	if node == null or not node is MMGenBase:
 		var parent : Node = gen.get_node_or_null(NodePath(node_path.get_base_dir())) if node_path.contains("/") else gen
 		var where : String = "in "+node_path.get_base_dir() if node_path.contains("/") else "at the top level"
 		var available : String = renderable_node_names(parent) if parent is MMGenBase else ""
-		host.show_error("no node %s in %s (nodes with outputs %s: %s)" % [ node_path, path.get_file(), where, available ], EXIT_BAD_ARGS)
+		var graph_name : String = str(gen.get_meta("file_path", "the graph")).get_file()
+		host.show_error("no node %s in %s (nodes with outputs %s: %s)" % [ node_path, graph_name, where, available ], EXIT_BAD_ARGS)
 	else:
 		rv.outputs = output_summary(node)
 		# The .ptex type (e.g. perlin, normal_map) when the node comes from a library definition
@@ -731,6 +747,3 @@ func render_output_file(path : String, node_path : String, port : int, size : in
 				host.show_error("cannot render %s:%d to %s" % [ node_path, port, output ], EXIT_RENDER)
 			else:
 				rv.file = output
-	remove_child(gen)
-	gen.free()
-	return rv

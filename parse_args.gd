@@ -287,7 +287,11 @@ func finish(options : Dictionary, results : Array[Dictionary]) -> void:
 func _ready():
 	RenderingServer.set_default_clear_color(Color.BLACK)
 	var args : PackedStringArray = OS.get_cmdline_args()
-	if ("--list-nodes" in args) or ("--describe-node" in args) or ("--validate" in args) or ("--render-output" in args) or ("--render-preview" in args):
+	if "--serve" in args:
+		var serve : Node = preload("res://cli_serve.gd").new()
+		add_child(serve)
+		await serve.run(self)
+	elif ("--list-nodes" in args) or ("--describe-node" in args) or ("--validate" in args) or ("--render-output" in args) or ("--render-preview" in args):
 		var inspect : Node = preload("res://cli_inspect.gd").new()
 		add_child(inspect)
 		await inspect.run(self, args)

@@ -35,20 +35,10 @@ func render(inspector : Node, path : String, meshes : Array[String], env_name : 
 	host = inspector.host
 	var start : int = Time.get_ticks_msec()
 	var rv : Dictionary = { input=path, meshes=meshes, env=env_name, size=size, file="" }
-	var env_manager : Node = load(ENVIRONMENT_MANAGER_SCENE).instantiate()
-	# Not added to the tree: its _exit_tree() rewrites user://environments.json
-	env_manager.base_dir = MMPaths.get_resource_dir()
-	env_manager._ready()
-	var env_index : int = find_environment(env_manager, env_name)
-	if env_index == -1:
-		var names : PackedStringArray = PackedStringArray()
-		for e : Dictionary in env_manager.get_environment_list():
-			names.append(e.name)
-		host.show_error("unknown --env %s (available: %s)" % [ env_name, ", ".join(names) ], inspect.EXIT_BAD_ARGS)
+	var env_manager : Node = create_environment_manager()
+	if find_environment_or_fail(env_manager, env_name) == -1:
 		env_manager.free()
 		return rv
-	rv.env = env_manager.get_environment(env_index).name
-	rv.env_index = env_index
 	if not await inspect.wait_for_rendering_device():
 		host.show_error("no rendering device (headless?), cannot render", inspect.EXIT_RENDER)
 		env_manager.free()
@@ -59,32 +49,59 @@ func render(inspector : Node, path : String, meshes : Array[String], env_name : 
 		env_manager.free()
 		return rv
 	add_child(gen)
-	var material : Node = gen.get_node_or_null("Material")
-	if not material is MMGenMaterial:
-		host.show_error("No Material node in %s" % path, inspect.EXIT_BAD_ARGS)
-	else:
-		rv.image_size = material.get_image_size()
-		# The Material node builds its preview shader and textures one frame after loading
-		for i in 3:
-			await get_tree().process_frame
-		await inspect.wait_for_buffers()
-		var image : Image = await render_meshes(material, meshes, env_manager, env_index, size)
-		var dir : String = output.get_base_dir()
-		if image == null:
-			host.show_error("rendering %s failed" % path.get_file(), inspect.EXIT_RENDER)
-		elif not DirAccess.dir_exists_absolute(dir) and DirAccess.make_dir_recursive_absolute(dir) != OK:
-			host.show_error("cannot create directory "+dir, inspect.EXIT_RENDER)
-		elif save_image(image, output) != OK:
-			host.show_error("cannot write "+output, inspect.EXIT_RENDER)
-		else:
-			rv.file = output
-			rv.width = image.get_width()
-			rv.height = image.get_height()
+	await render_gen(inspector, gen, env_manager, meshes, env_name, size, output, rv)
 	remove_child(gen)
 	gen.free()
 	env_manager.free()
 	rv.seconds = (Time.get_ticks_msec()-start)/1000.0
 	return rv
+
+# The caller frees it (it is not added to the tree: its _exit_tree() rewrites user://environments.json)
+static func create_environment_manager() -> Node:
+	var env_manager : Node = load(ENVIRONMENT_MANAGER_SCENE).instantiate()
+	env_manager.base_dir = MMPaths.get_resource_dir()
+	env_manager._ready()
+	return env_manager
+
+func find_environment_or_fail(env_manager : Node, env_name : String) -> int:
+	var env_index : int = find_environment(env_manager, env_name)
+	if env_index == -1:
+		var names : PackedStringArray = PackedStringArray()
+		for e : Dictionary in env_manager.get_environment_list():
+			names.append(e.name)
+		host.show_error("unknown --env %s (available: %s)" % [ env_name, ", ".join(names) ], inspect.EXIT_BAD_ARGS)
+	return env_index
+
+# Renders the Material node of a loaded generator (in the tree); fills rv (file, env, width...)
+func render_gen(inspector : Node, gen : MMGenBase, env_manager : Node, meshes : Array[String], env_name : String, size : int, output : String, rv : Dictionary) -> void:
+	inspect = inspector
+	host = inspector.host
+	var env_index : int = find_environment_or_fail(env_manager, env_name)
+	if env_index == -1:
+		return
+	rv.env = env_manager.get_environment(env_index).name
+	rv.env_index = env_index
+	var material : Node = gen.get_node_or_null("Material")
+	if not material is MMGenMaterial:
+		host.show_error("No Material node in %s" % str(gen.get_meta("file_path", "the graph")), inspect.EXIT_BAD_ARGS)
+		return
+	rv.image_size = material.get_image_size()
+	# The Material node builds its preview shader and textures one frame after loading
+	for i in 3:
+		await get_tree().process_frame
+	await inspect.wait_for_buffers()
+	var image : Image = await render_meshes(material, meshes, env_manager, env_index, size)
+	var dir : String = output.get_base_dir()
+	if image == null:
+		host.show_error("rendering %s failed" % str(gen.get_meta("file_path", "the graph")).get_file(), inspect.EXIT_RENDER)
+	elif not DirAccess.dir_exists_absolute(dir) and DirAccess.make_dir_recursive_absolute(dir) != OK:
+		host.show_error("cannot create directory "+dir, inspect.EXIT_RENDER)
+	elif save_image(image, output) != OK:
+		host.show_error("cannot write "+output, inspect.EXIT_RENDER)
+	else:
+		rv.file = output
+		rv.width = image.get_width()
+		rv.height = image.get_height()
 
 static func find_environment(env_manager : Node, env_name : String) -> int:
 	var list : Array = env_manager.get_environment_list()
