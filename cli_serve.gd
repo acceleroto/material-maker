@@ -365,6 +365,19 @@ func set_parameters(gen : MMGenBase, values : Dictionary) -> Array:
 		changed.append({ name=k, old=old_value, new=MMType.serialize_value(gen.parameters.get(k, v)) })
 	return changed
 
+# mm_deps.do_update() awaits buffer renders of the graph's nodes: freeing a node while it renders
+# leaves that coroutine waiting forever (and every later render waiting for mm_deps.updated).
+# Called before freeing a graph or removing a node.
+func settle_renders(timeout_ms : int = 30000) -> void:
+	var deadline : int = Time.get_ticks_msec()+timeout_ms
+	# Start pending updates (do_update runs deferred), then wait until they are done
+	mm_deps.update()
+	await get_tree().process_frame
+	while mm_deps.updating and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	if mm_deps.updating:
+		show_warning("renders still running after %d s" % (timeout_ms/1000))
+
 # Methods (m_<name>: params Dictionary -> result Dictionary; errors through fail()/show_error())
 
 func m_load(params : Dictionary) -> Dictionary:
@@ -376,6 +389,7 @@ func m_load(params : Dictionary) -> Dictionary:
 		show_error("Cannot load %s (%s)" % [ path, "not a valid material file" if FileAccess.file_exists(path) else "no such file" ], 2)
 		return {}
 	if graph != null:
+		await settle_renders()
 		remove_child(graph)
 		graph.free()
 	graph = gen
@@ -536,6 +550,7 @@ func m_remove_node(params : Dictionary) -> Dictionary:
 		fail("bad_params", "cannot remove the top level graph")
 		return {}
 	var removed : Dictionary = node_connections(parent, gen.name)
+	await settle_renders()
 	if not parent.remove_generator(gen):
 		fail("cannot_delete", "%s cannot be deleted" % node_path)
 		return {}
@@ -680,6 +695,8 @@ func m_render_output(params : Dictionary) -> Dictionary:
 	var port : int = optional_int(params, "port", 0, 0, 1000)
 	var size : int = optional_int(params, "size", inspect.RENDER_DEFAULT_SIZE, inspect.RENDER_MIN_SIZE, inspect.RENDER_MAX_SIZE)
 	if not errors.is_empty():
+		return {}
+	if find_gen(node_path) == null:
 		return {}
 	var rv : Dictionary = { node=node_path, port=port, size=size, file="" }
 	if not await inspect.wait_for_rendering_device():

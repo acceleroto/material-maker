@@ -170,11 +170,11 @@
   spreads the angle. Open ideas: zoom/crop helper for fine detail, `parameter_out_of_range` too strict (voronoi stretch).
 
 ## In progress
-- 5.1: `cli_serve.gd` (`--serve`, 15 methods) + `agent_tools/mm_client.py` (MMClient, `batch`, `bench`) work: after
-  set_param/add_node/connect edits the server's render_preview, render_output and all 5 exported maps are byte-identical to
-  CLI renders/exports of the saved graph. Float params reject non-numeric strings unless they reference `$`/`rnd`
-  (a junk string is pasted into GLSL and breaks the shader). Next: `agent_tools/test_mm_client.py` (fake + real server),
-  GUT `test/test_cli_serve.gd`, bench, docs.
+- 5.1: `cli_serve.gd` + `agent_tools/mm_client.py` + tests done (GUT `test/test_cli_serve.gd` 9 tests, total 50 pass;
+  `agent_tools/test_mm_client.py` 22 pass in ~18 s incl. real-server renders/export byte-identical to the CLI).
+  **Bug found+fixed:** freeing a graph (load) or removing a node while mm_deps still renders its buffers left
+  `mm_deps.do_update()` awaiting forever → every later render hung; the server now waits for mm_deps to settle first
+  (`settle_renders`). Next: bench (`mm_client.py bench`), docs (README "Server mode", CLAUDE.md, SKILL/AGENTS), PROGRESS.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
