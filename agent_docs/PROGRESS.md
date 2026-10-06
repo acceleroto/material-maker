@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 0.3 (complete)
+**Current session:** 0.4 (complete)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -31,6 +31,8 @@
   (wrote a Lambert-lit preview sheet). Findings + tool wishlist appended to phase0_notes.md.
   Prototype helpers (export.sh with DONE marker, g.py edit API, sheet.py) in
   `agent_tools/proto_0.3/`.
+- 0.4 (user, 2026-10-05): decision: the pipeline works and the agent made reasonable progress
+  ("not amazing, but a good start") → continue to Phase 1 (normal path).
 
 ## In progress
 - None.
@@ -40,8 +42,10 @@
   (check in GUI when convenient). Exports must run via `run_in_terminal`.
 
 ## Next step
-- 0.4 — **human decision** (see ROADMAP.md "### 0.4"): the user opens `agent_runs/0.3/`
-  (look at `iter_*/sheet.png` + `critique.md`), reads the 0.3 section of
-  `agent_docs/phase0_notes.md`, and chooses: Phase 1 (normal path), Phase 1 then prioritise
-  Phase 4 (previews), or troubleshoot export. Agent's recommendation: Phase 1, then prioritise
-  Phase 4: flat maps were the second-biggest blocker. No agent work until the user decides.
+- Session 1.1 per ROADMAP.md "### 1.1" (use plan mode first; user approves): build
+  `agent_tools/mmx.py` with `mmx catalog` (→ `agent_tools/catalog.json` + `agent_docs/NODES.md`,
+  <600 lines) and `mmx validate <ptex>` (JSON `{"ok","errors"}`, exit 0/1). Test against all
+  release examples + 3 broken copies. Lessons from 0.3 to fold in: include port shortdesc/longdesc
+  (esp. which `blend` input is the top layer), and resolve subgraph nodes' `paramN` (e.g.
+  `normal_map.param1` = amount) to real labels. Prototype helpers in `agent_tools/proto_0.3/`.
+  Then update PROGRESS.md (next: 1.2).
