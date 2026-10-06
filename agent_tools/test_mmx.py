@@ -440,6 +440,60 @@ class TestEngineValidate(unittest.TestCase):
         self.assertIn("source", r["warnings"][-1]["message"])
 
 
+class TestNodePreview(unittest.TestCase):
+    setUp = TestEngineValidate.setUp  # fake engine (only its fixtures, not its tests)
+    setenv = TestEngineValidate.setenv
+
+    def summary(self, ok=True, errors=()):
+        return {"mm_cli": 1, "mode": "render-output", "ok": ok, "exit_code": 0 if ok else 1, "errors": list(errors),
+                "warnings": [], "type": "perlin", "output_type": "f", "outputs": [{"index": 0, "type": "f", "label": ""}]}
+
+    def test_default_path(self):
+        p = mmx.node_preview_path("/x/bricks.ptex", "graph/Bricks", 2, runs_dir="/r")
+        self.assertEqual(p, Path("/r/node_preview/bricks/graph__Bricks_p2.png"))
+
+    def test_argv_and_missing_file(self):
+        out = Path(self.tmp.name) / "sub" / "n.png"
+        self.setenv(FAKE_ENGINE_SUMMARY=self.summary())
+        r = mmx.node_preview(BRICKS, "Perlin", 1, 256, out, self.cfg)
+        # the fake engine writes no file: success must not be reported
+        self.assertFalse(r["ok"])
+        self.assertIn("was not written", r["errors"][0])
+        self.assertEqual(r["output_type"], "f")
+        self.assertTrue(out.parent.is_dir())
+
+    def test_ok_when_file_written(self):
+        out = Path(self.tmp.name) / "n.png"
+        self.setenv(FAKE_ENGINE_SUMMARY=self.summary())
+        orig = mmx.run_engine
+
+        def fake_run(args, cfg=None, timeout=None):
+            self.assertEqual(args, ["--render-output", str(BRICKS.resolve()), "--node", "Perlin", "--port", "0",
+                                    "--size", "64", "-o", str(out.resolve())])
+            out.write_bytes(b"png")
+            return orig(args, cfg, timeout)
+        mmx.run_engine = fake_run
+        self.addCleanup(setattr, mmx, "run_engine", orig)
+        r = mmx.node_preview(BRICKS, "Perlin", 0, 64, out, self.cfg)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["file"], str(out.resolve()))
+
+    def test_engine_error(self):
+        out = Path(self.tmp.name) / "n.png"
+        out.write_bytes(b"stale")
+        self.setenv(FAKE_ENGINE_SUMMARY=self.summary(False, ["no node nope in bricks.ptex"]), FAKE_ENGINE_EXIT="1")
+        r = mmx.node_preview(BRICKS, "nope", 0, 64, out, self.cfg)
+        self.assertFalse(r["ok"])
+        self.assertFalse(out.exists())  # stale image removed
+        self.assertEqual(r["errors"], ["no node nope in bricks.ptex"])
+
+    def test_no_summary(self):
+        self.setenv(FAKE_ENGINE_MODE="nojson", FAKE_ENGINE_SUMMARY="{}")
+        r = mmx.node_preview(BRICKS, "Perlin", 0, 64, Path(self.tmp.name) / "n.png", self.cfg)
+        self.assertFalse(r["ok"])
+        self.assertIn("no JSON summary", r["errors"][0])
+
+
 class TestEngineCatalogMerge(unittest.TestCase):
     def test_merge(self):
         static = mmx.Catalog({
@@ -547,6 +601,17 @@ class TestRealEngine(Base):
         summary, _ = self.engine("--list-nodes")
         self.assertTrue(summary["ok"])
         self.assertIn("Pattern/Bricks", {i["tree_item"] for i in summary["items"]})
+
+    def test_render_output(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as t:
+            r = mmx.node_preview(BRICKS, "graph/Bricks", 0, 128, Path(t) / "b.png")
+            self.assertTrue(r["ok"], r)
+            self.assertEqual(r["type"], "bricks")
+            self.assertEqual(Image.open(r["file"]).size, (128, 128))
+            r = mmx.node_preview(BRICKS, "Perlin", 3, 128, Path(t) / "p.png")
+            self.assertFalse(r["ok"])
+            self.assertIn("no port 3", r["errors"][0])
 
     def test_mmx_validate_cli(self):
         rc, r = run_validate(BRICKS)

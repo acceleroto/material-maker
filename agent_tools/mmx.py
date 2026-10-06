@@ -9,6 +9,8 @@ Subcommands:
   node      Print one catalog entry as JSON.
   export    Validate, then export a .ptex with the Material Maker binary (config: mmx.toml);
             JSON summary of files written, exit 0 (ok) / 1 (validation/plan) / 2 (export failed).
+  node-preview  Render one output of one node to a PNG (engine --render-output, source mode),
+            to debug a graph stage by stage; JSON, exit 0/1.
   sheet     Labeled contact-sheet PNG of an export dir (needs Pillow, agent_tools/.venv).
   run       One iteration: agent_runs/<run>/iter_NNN/ with ptex copy, out/, sheet.png.
   wait      Poll for the result of an export/run started elsewhere (e.g. the Terminal panel).
@@ -1552,6 +1554,46 @@ def engine_validate(ptex, cfg=None, timeout=None):
             "outputs_checked": f.get("outputs_checked")}
 
 
+def node_preview_path(ptex, node, port=0, runs_dir=None):
+    """Default output of node-preview: agent_runs/node_preview/<ptex stem>/<node>_p<port>.png
+    (sub-graph paths a/b become a__b)."""
+    return Path(runs_dir or RUNS_DIR) / "node_preview" / Path(ptex).stem / ("%s_p%d.png" % (node.replace("/", "__"), port))
+
+
+def node_preview(ptex, node, port=0, size=512, out=None, cfg=None, timeout=None):
+    """Render one output of one node to a PNG with the engine's --render-output.
+    Returns {"ok", "file", "node", "port", "size", "output_type", "outputs", "seconds", "errors", "warnings"}."""
+    out = Path(out).resolve() if out else node_preview_path(ptex, node, port)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()  # never report a stale image
+    args = ["--render-output", str(Path(ptex).resolve()), "--node", node, "--port", str(port),
+            "--size", str(size), "-o", str(out)]
+    summary, info = run_engine(args, cfg, timeout)
+    rv = {"ok": False, "file": None, "node": node, "port": port, "size": size, "seconds": info.get("seconds"),
+          "errors": [], "warnings": []}
+    if summary is None:
+        rv["errors"].append(info["error"])
+        return rv
+    rv["errors"] = summary.get("errors") or []
+    rv["warnings"] = summary.get("warnings") or []
+    for k in ("type", "output_type", "output_label", "outputs"):
+        if k in summary:
+            rv[k] = summary[k]
+    rv["ok"] = bool(summary.get("ok")) and out.is_file()
+    if summary.get("ok") and not out.is_file():
+        rv["errors"].append("engine reported success but %s was not written" % out)
+    if rv["ok"]:
+        rv["file"] = str(out)
+    return rv
+
+
+def cmd_node_preview(args):
+    result = node_preview(args.ptex, args.node, args.port, args.size, args.out, load_config(args.config), args.timeout)
+    print(json.dumps(result, indent=1, ensure_ascii=False))
+    return 0 if result["ok"] else 1
+
+
 # ---------------------------------------------------------------------------
 # sheet (needs Pillow: agent_tools/.venv, see README)
 # ---------------------------------------------------------------------------
@@ -1822,6 +1864,15 @@ def main(argv=None):
     p.add_argument("--no-validate", action="store_true", help="skip mmx validate")
     export_opts(p)
     p.set_defaults(fn=cmd_export)
+    p = sub.add_parser("node-preview", help="render one output of one node to a PNG (engine, source mode); JSON, exit 0/1")
+    p.add_argument("ptex")
+    p.add_argument("--node", required=True, help="node name; a/b for a node inside sub-graph a")
+    p.add_argument("--port", type=int, default=0, help="output index (default 0; the result lists all outputs)")
+    p.add_argument("--size", type=int, default=512, help="image size in pixels (16..8192, default 512)")
+    p.add_argument("--out", help="output PNG (default agent_runs/node_preview/<ptex stem>/<node>_p<port>.png)")
+    p.add_argument("--timeout", type=float, help="seconds before Godot is killed (default from mmx.toml)")
+    p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
+    p.set_defaults(fn=cmd_node_preview)
     p = sub.add_parser("sheet", help="labeled contact-sheet PNG of an export dir")
     p.add_argument("dir")
     p.add_argument("--out", help="output PNG (default <dir>/sheet.png)")

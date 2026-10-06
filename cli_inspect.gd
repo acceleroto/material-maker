@@ -679,7 +679,8 @@ func render_output_file(path : String, node_path : String, port : int, size : in
 		host.show_error("no node %s in %s (nodes with outputs %s: %s)" % [ node_path, path.get_file(), where, available ], EXIT_BAD_ARGS)
 	else:
 		rv.outputs = output_summary(node)
-		rv.type = node.get_type()
+		# The .ptex type (e.g. perlin, normal_map) when the node comes from a library definition
+		rv.type = str(node.model) if node.model != null else node.get_type()
 		if rv.outputs.is_empty() or NO_SHADER_TYPES.has(node.get_type()) or node is MMGenMaterial:
 			host.show_error("node %s (%s) has no renderable outputs" % [ node_path, node.get_type() ], EXIT_BAD_ARGS)
 		elif port >= rv.outputs.size():

@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 3.1 (complete); next 4.1
+**Current session:** 4.1 (in progress)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -117,7 +117,7 @@
   errors, so the compile check only runs on otherwise-clean graphs.
 
 ## In progress
-- None.
+- 4.1: `--render-output` (cli_inspect.gd) + `mmx node-preview` done and tested; docs pending.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
