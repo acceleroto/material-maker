@@ -253,6 +253,14 @@ except ImportError:
 
 @unittest.skipUnless(HAVE_PIL, "needs Pillow (run with agent_tools/.venv/bin/python)")
 class TestSheet(unittest.TestCase):
+    def test_lit_light_from_top_left(self):
+        from PIL import Image
+        albedo = Image.new("RGB", (8, 8), (200, 200, 200))
+        def lit(rgb):  # Unity/OpenGL normal: G > 128 faces up (towards the image top)
+            return mmx.lit_preview(albedo, Image.new("RGB", (8, 8), rgb), size=8).getpixel((4, 4))[0]
+        self.assertGreater(lit((128, 200, 230)), lit((128, 56, 230)))  # up-facing brighter than down
+        self.assertGreater(lit((56, 128, 230)), lit((200, 128, 230)))  # left-facing brighter than right
+
     def test_sheet(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as t:

@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 1.2 (complete)
+**Current session:** 1.3 (complete)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -59,16 +59,26 @@
   `run_in_terminal` + `mmx wait`. Real runs: `agent_runs/s1.2/iter_001` (bricks, via Terminal panel),
   `iter_002` (improved_brick, via Bash).
 
+- 1.3 (agent, 2026-10-05): `.claude/skills/material-maker/SKILL.md` (when to use, 8-iteration loop: closest example →
+  validate → `mmx run` → read sheet → `critique.md` → 1–2 edits; reading the sheet; pitfalls; debug-export technique) and
+  root `AGENTS.md` (project rules + a verbatim copy of the skill body; keep in sync). `agent_docs/examples_annotated.md`
+  (dry_earth, wooden_floor, wood, metal_pattern_2). End-to-end test in `agent_runs/1.3/{desert,steel,oak}/` (6 iterations
+  each): desert **success**, steel **success**, oak **partial**; export ~3.8 s, ~18 s median wall per iteration.
+  Report: `agent_docs/phase1_report.md` (recommends Phase 4 > 3 > 2 > 5).
+  **Fixes:** `mmx sheet` lit preview lit from the bottom-left (y-sign bug; older sheets show bumps as dents) → top-left
+  + test; `mmx run --run-name` may nest (`1.3/desert`) + test (21 tests pass). **Findings:** Material in 6 is *depth*
+  (Unity `_height.png` = 1 − depth); `tiler.scale_x/y` are fractions of the whole texture; unconnected inputs read as 0
+  and `validate` doesn't flag them (cheap follow-up: warn on used nodes with unconnected inputs).
+
 ## In progress
 - None.
 
 ## Blockers
-- None. Exports must run via `run_in_terminal` (Bash-launched exports hang).
+- None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 1.3 per ROADMAP.md "### 1.3": create `.claude/skills/material-maker/SKILL.md` (+ root `AGENTS.md`)
-  with the iteration workflow built on `mmx validate` → `mmx run <ptex> --run-name X --note "..."` → view
-  `iter_NNN/sheet.png` → critique → edit 1–2 things (cap 8 iterations); add `agent_docs/examples_annotated.md`
-  (4 example graphs explained); then the 3-request end-to-end test from the roadmap. Read
-  `agent_tools/README.md` ("Export, sheet, run") and `agent_docs/phase0_notes.md` pitfalls first. If an
-  export times out, use the Terminal-panel fallback (`run_in_terminal` + `mmx wait --run-name X`).
+- **Checkpoint 1 (👤 user, ~15 min)** per ROADMAP.md "### Checkpoint 1": look at the final sheets
+  `agent_runs/1.3/{desert,steel,oak}/iter_006/sheet.png` (+ each `summary.md`), read `agent_docs/phase1_report.md`,
+  and try the skill in a fresh Claude Code session ("make me a <material>"). Then decide: stop here, or continue to
+  Setup B + Session 2.1 (Phase 2). Optional small agent task before 2.1: `mmx validate` warning for nodes whose output
+  is used but which have unconnected inputs.

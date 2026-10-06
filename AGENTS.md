@@ -1,9 +1,21 @@
----
-name: material-maker
-description: Design a procedural PBR material in Material Maker from a text description (or reference photo), iterate on it visually with mmx, and export it for Unity/URP. Use when the user asks for a texture or material ("make a mossy stone wall", "rusty metal for Unity", "tweak the planks to look older"), or wants to edit, preview or export a .ptex.
----
+# AGENTS.md — Material Maker Agent fork
 
-# Material Maker: make a material from a description
+Instructions for coding agents (Codex and others). Claude Code reads `CLAUDE.md` and the skill in
+`.claude/skills/material-maker/SKILL.md`; this file mirrors both. **Keep the material workflow below in sync
+with SKILL.md** (it is a copy of the skill body).
+
+## Project rules
+- Goal: make Material Maker usable by AI agents (procedural PBR materials from text, visual iteration, Unity export).
+  Plan: `agent_docs/ROADMAP.md`; current state and next step: `agent_docs/PROGRESS.md`.
+- Work only on branch `agent`; push only with `git push origin agent`. Never push to `master` or `upstream`,
+  never force-push, never open PRs upstream (upstream forbids AI-written PRs).
+- Commit after every working step (`Session X.Y: <what>`) and update `agent_docs/PROGRESS.md` first.
+- New Python tooling goes in `agent_tools/`, docs in `agent_docs/`; keep upstream file changes minimal.
+- Never run Material Maker/Godot with `--headless` (it needs a GPU); use `agent_tools/mmx.py`, which handles
+  the CLI rules (absolute paths, `--target`, `--export-material`).
+- Iteration output goes in `agent_runs/` (gitignored).
+
+## Making a material from a description
 
 You build a `.ptex` graph (JSON), export it with Material Maker through `agent_tools/mmx.py`,
 look at the contact sheet, and repeat until it matches the request. Everything runs from the
@@ -19,7 +31,7 @@ Reference, read on demand (don't inline them into your context all at once):
 - `agent_docs/examples_annotated.md`: four example graphs explained node by node.
 - `agent_tools/README.md`: mmx commands, validation codes, export/sheet details.
 
-## The loop (cap: 8 iterations; stop earlier when it matches)
+### The loop (cap: 8 iterations; stop earlier when it matches)
 
 1. **Restate the request** as 3–6 checkable traits: macro shape/pattern, colour palette, surface
    relief, roughness/metal, style (realistic vs stylized), scale (how many features per tile).
@@ -55,7 +67,7 @@ Reference, read on demand (don't inline them into your context all at once):
 When you stop, write `agent_runs/<run>/summary.md`: final iteration, which traits match, what's
 still off, seconds per iteration. Point the user at the final `sheet.png` and `out/`.
 
-## Reading the contact sheet
+### Reading the contact sheet
 
 Tiles, left to right, top to bottom (only maps that were exported appear):
 - **lit**: crude Lambert preview (light from the top-left, albedo × N·L × AO; raised things are lit on
@@ -73,7 +85,7 @@ Tiles, left to right, top to bottom (only maps that were exported appear):
 - A map is missing from the sheet if nothing is wired into that Material input (no roughness
   input → no `metal_smoothness` PNG at all).
 
-## Pitfalls seen in this project
+### Pitfalls seen in this project
 
 - **Blend ports.** `blend` in 0 = foreground (top), in 1 = background, in 2 = mask (1 shows the
   foreground). Lowering `amount` fades out the *foreground*. Getting this backwards cost a whole
@@ -115,7 +127,7 @@ Tiles, left to right, top to bottom (only maps that were exported appear):
 - **CLI rules** (already handled by mmx): absolute paths, `--target` not `-t`,
   `--export-material` not `--export`, never `--headless`. Use mmx instead of calling the binary.
 
-## Don't
+### Don't
 
 - Don't edit files in `material_maker/examples/` or `addons/`; copy into `agent_runs/`.
 - Don't make many changes in one iteration: you won't know which one helped.

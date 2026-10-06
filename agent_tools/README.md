@@ -99,7 +99,7 @@ roughness, metallic, AO, emission, ... Packed maps are split (Unity `metal_smoot
 metallic, roughness = 1 − A; Godot `orm`: R/G/B = AO/roughness/metallic). Grayscale tiles are
 labeled with min/mean/max so flat or clipped maps are obvious. Default output `<dir>/sheet.png`.
 
-**run**: claims the next `agent_runs/<run>/iter_NNN/` (from 001), copies the ptex there (outputs
+**run**: claims the next `agent_runs/<run>/iter_NNN/` (from 001; `--run-name` may nest with `/`, e.g. `1.3/desert`), copies the ptex there (outputs
 are named after it), exports into `iter_NNN/out/`, writes `iter_NNN/sheet.png`,
 `mmx_result.json` (export result + `iter_dir`, `sheet`), `mmx_status.json` (running/done) and
 `note.md` (`--note`). Validation failures still use up an iteration dir (the result explains why).
@@ -114,7 +114,8 @@ nextDrawable`). In Session 1.2 it did **not** reproduce: `mmx export`, a plain s
 direct shell launch all finished in ~5–7 s (6/6). So call `mmx run` from Bash first; if it reports
 `error: timeout` (with the hint), use the Terminal panel + `mmx wait`.
 
-Limitations: the lit preview is a flat-plane Lambert approximation (no specular, no parallax) and
+Fixed in Session 1.3: the lit preview used to put the light at the bottom-left (a y-sign slip), so
+raised features looked sunken on sheets made before then. Limitations: the lit preview is a flat-plane Lambert approximation (no specular, no parallax) and
 assumes OpenGL (+Y) normals; additional `material_export` nodes' files aren't predicted; only the
 first material node is checked.
 

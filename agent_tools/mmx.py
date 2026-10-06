@@ -1413,7 +1413,7 @@ def lit_preview(albedo, normal, ao=None, size=512):
     a = albedo.convert("RGB").resize((size, size)).tobytes()
     n = normal.convert("RGB").resize((size, size)).tobytes()
     o = ao.convert("L").resize((size, size)).tobytes() if ao is not None else None
-    lx, ly, lz = -0.5, 0.6, 0.62
+    lx, ly, lz = -0.5, -0.6, 0.62  # image space (y down): up-left of the surface
     ln = (lx * lx + ly * ly + lz * lz) ** 0.5
     lx, ly, lz = lx / ln, ly / ln, lz / ln
     px = bytearray(len(a))
