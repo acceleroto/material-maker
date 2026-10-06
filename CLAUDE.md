@@ -57,8 +57,12 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 ## Agent tools
 - Node reference: `agent_docs/NODES.md`; full data `agent_tools/catalog.json`; one type:
   `python3 agent_tools/mmx.py node <type>`.
-- Run `python3 agent_tools/mmx.py validate <file.ptex>` after every `.ptex` edit, before exporting.
+- Run `python3 agent_tools/mmx.py validate <file.ptex>` after every `.ptex` edit, before exporting
+  (Python checks, then the engine's `--validate`: types, connections, shader compile; `--fast` = Python only).
   See `agent_tools/README.md` for error codes and limitations.
+- Engine inspection (source mode, since 3.1; `cli_inspect.gd`): `<Godot> --path <Repo> --list-nodes --json`,
+  `--describe-node <type>...|--all --json`, `--validate <abs ptex>... --json` (exit 0/1/2/4). `mmx catalog`
+  regenerates `catalog.json` + `NODES.md` from them (`--static` = Python-only).
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
   `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).
 

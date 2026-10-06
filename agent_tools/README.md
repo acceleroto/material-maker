@@ -13,26 +13,39 @@ python3 -m venv agent_tools/.venv && agent_tools/.venv/bin/pip install pillow
 ## mmx.py
 
 ```
-python3 agent_tools/mmx.py catalog            # rebuild catalog.json + agent_docs/NODES.md
-python3 agent_tools/mmx.py validate <file.ptex>
+python3 agent_tools/mmx.py catalog [--static]  # rebuild catalog.json + agent_docs/NODES.md (from the engine)
+python3 agent_tools/mmx.py validate <file.ptex> [--fast] [--timeout S]
 python3 agent_tools/mmx.py node <type>        # one type's params/ports as JSON
 python3 agent_tools/mmx.py export <file.ptex> --out <dir> [--target "Unity/URP"] [--timeout S] [--keep-meta]
 python3 agent_tools/mmx.py sheet <dir> [--out sheet.png]
 python3 agent_tools/mmx.py run <file.ptex> --run-name NAME [--note "what changed"]
 python3 agent_tools/mmx.py wait (<dir> | --run-name NAME) [--timeout S]
 agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain python3 skips the sheet test
+                                     # TestRealEngine runs Godot (~1 min); MMX_SKIP_ENGINE=1 skips it
 ```
 
-- **catalog**: reads `addons/material_maker/nodes/*.mmg`, `nodes/io_types.mmt` and
-  `material_maker/library/*.json`. Writes `agent_tools/catalog.json` (every type: kind, category,
-  parameters with type/range/default/enum values, inputs/outputs with 0-based index, type and
-  descriptions, port-type conversion table) and the condensed `agent_docs/NODES.md` (~65 types,
-  < 600 lines; the curated list is `CURATED` in `mmx.py`). `--nodes-dir DIR` adds another `.mmg`
-  dir that overrides repo defs (e.g. the release app's `nodes/` if it differs from the repo).
-  Re-run after changing node definitions; commit both outputs.
-- **validate**: prints `{"ok": bool, "errors": [...], "warnings": [...]}`; exit 0 if no errors, else 1.
-  Each item has `code`, `graph_path` (`/`, `/graph`, ...), `node`, `message`, and often `hint`
-  (close-match suggestions, valid ports or the expected parameter format).
+- **catalog**: asks the engine (`--list-nodes`, `--describe-node --all`, see "Engine CLI modes" below;
+  ~4 s, needs `mode = "source"`) and overlays that on a Python parse of `addons/material_maker/nodes/*.mmg`,
+  `nodes/io_types.mmt` and `material_maker/library/*.json`. The engine is authoritative for labels,
+  descriptions, parameters, ports, categories and keywords; the Python parse adds generic templates,
+  `source`, `superseded_by`, `library_graphs` and the port-type table. Writes `agent_tools/catalog.json`
+  (every type: kind, `generator` class, category (menu path) and `section`, parameters with
+  type/range/default/enum values, inputs/outputs with 0-based index, type and descriptions) and the
+  condensed `agent_docs/NODES.md` (~65 types, < 600 lines; the curated list is `CURATED` in `mmx.py`).
+  A parameter's `default` is the value a node starts with (what an omitted `.ptex` parameter resolves
+  to); `def_default` is the definition's own default when different. `engine_vs_static` lists types
+  where the Python parse disagrees with the engine (2026-10-06: only `comment_line`, `webcam`).
+  `--static` skips the engine; `--nodes-dir DIR` (static only) adds a `.mmg` dir that overrides repo
+  defs (e.g. the release app's `nodes/`). Re-run after changing node definitions; commit both outputs.
+- **validate**: Python checks first (instant). If they pass, runs the engine's `--validate` (~2 s for
+  bricks: loads the file with `mm_loader`, checks types and connections against the instantiated
+  generators, compiles every output's shader) and merges its findings (`"source": "engine"`).
+  `--fast` (or `validate_engine = false` in `mmx.toml`) skips the engine; if the engine can't run
+  (release mode, no Godot, timeout) you get an `engine_unavailable` warning and the Python result.
+  Prints `{"ok", "errors", "warnings", "checks": ["static", "engine"], "engine": {seconds, nodes,
+  outputs_checked}}`; exit 0 if no errors, else 1. Each item has `code`, `graph_path` (`/`, `/graph`,
+  ...), `node`, `message`, and often `hint` (close-match suggestions, valid ports or the expected
+  parameter format). `mmx export`/`run` only run the Python checks (the export itself is the engine).
 
 | code | level | meaning |
 |---|---|---|
@@ -50,6 +63,9 @@ agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain py
 | `ignored_parameter` | warning | known leftover from an older MM version (or edited inline shader); ignored by MM |
 | `parameter_out_of_range` | warning | outside the slider range (allowed; common in examples) |
 | `unresolved_type` | warning | `website:` type, fetched by MM at load time |
+| `shader_compile_error` | error (engine) | generated GLSL doesn't compile; `node` is the node whose code fails (`section`, `line`, `code_line`, `messages`, `outputs` = compiled outputs that hit it) |
+| `connection_rejected` | error (engine) | the engine refused a connection (loop) |
+| `engine_check_skipped`, `engine_unavailable`, `shader_check_skipped` | warning | engine/shader check not run (Python errors, no Godot, graph errors, `--headless`) |
 
 Type resolution mirrors `MMLoader.create_gen` (`addons/material_maker/engine/loader.gd`): inline
 `shader_model` → shader/material; inline `nodes`/`connections` → subgraph (ports from its
@@ -58,9 +74,36 @@ then built-in types (`buffer`, `switch`, `ios`, `reroute`, `portal`, `image`, `e
 hand-coded from `engine/nodes/gen_*.gd`); then `.mmg` files. Generic nodes expand their `#`
 ports/params by the node's `generic_size`, defaulting to the `.mmg`'s own `generic_size`.
 
+### Engine CLI modes (Session 3.1, `cli_inspect.gd`)
+
+`parse_args.gd` hands these to `cli_inspect.gd` (source mode; not in the release app). Add `--json` for
+one summary line `{"mm_cli": 1, "mode", "ok", "exit_code", "errors", "warnings", ...}` (stdout also has
+Godot noise; take the last line starting with `{"`). Exit codes: 0 ok, 1 bad arguments, 2 load failure /
+unknown type, 4 validation errors.
+
+```
+<Godot> --path <repo> --list-nodes --json                       # items (add-node menu) + types
+<Godot> --path <repo> --describe-node bricks3 blend2 --json    # or --describe-node --all (~2 s)
+<Godot> --path <repo> --validate <abs a.ptex> [<abs b.ptex>...] --json
+```
+
+- `--list-nodes`: `items` = every add-node menu entry, read through the editor's own library manager
+  (`tree_item`, `display_name`, `category` = top section, `type`, `library`, `enabled`, `inline_graph`,
+  `shortdesc`, `keywords` from the aliases); `types` = every type `mm_loader.create_gen` accepts
+  (`label`, `category`, `in_library`, `builtin`, `shortdesc`).
+- `--describe-node`: per type, the instantiated generator's `generator` class, `label`, descriptions,
+  raw `parameters`/`inputs`/`outputs` defs (parameter `default` = the instantiated value).
+- `--validate`: per file `{input, ok, nodes, outputs_checked, errors, warnings}`: `unknown_type`,
+  connection codes as in the table above, then (only if no errors so far) `shader_compile_error` for
+  every output of every node, including nodes inside sub-graphs, compiled to SPIR-V with
+  `MMComputeShader` (nothing is rendered). Each faulty node is reported once. All 43 examples: ~50 s in
+  one launch; `doc_tools.ptex` (MM's doc helper graph) really has 2 GLSL errors. Needs a GPU context:
+  under `--headless` the shader check is skipped with a warning.
+- GUT: `<Godot> --headless --path <repo> -s addons/gut/gut_cmdln.gd -gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd -gexit`.
+
 ### Limitations
-- Structural checks only: no shader compilation, expressions in float parameters (`"$time*2"`)
-  aren't evaluated, and a valid file can still render nothing useful.
+- The Python checks are structural only; the engine check adds shader compilation. Neither evaluates
+  expressions in float parameters (`"$time*2"`), and a valid file can still render nothing useful.
 - `website:` node types and user shared nodes (`user://shared_nodes`) aren't available offline.
 - Ports of `meshmap`, `sdf`, brush and `model_data` nodes, and an empty `material_export` node, are
   unknown, so their connections aren't range-checked.

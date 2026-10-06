@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 3.1 (in progress)
+**Current session:** 3.1 (complete); next 4.1
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -95,9 +95,7 @@
   32 mmx tests pass (fake binary covers exit codes 1/2/3 + missing summary). `mmx run` bricks: ~5.4 s;
   `--size 256`: ~2 s. Not exercised: the additional-export (export node) branch — no example uses one.
 
-## In progress
-- 3.1 (agent, 2026-10-06), plan: `~/.claude/plans/cheeky-wobbling-karp.md` (steps: list → describe → validate →
-  mmx catalog → mmx validate). Done so far: `cli_inspect.gd` (repo root; `parse_args.gd` delegates to it when
+- 3.1 (agent, 2026-10-06): `cli_inspect.gd` (repo root; `parse_args.gd` delegates to it when
   `--list-nodes`/`--describe-node`/`--validate` is given). `--list-nodes --json` (items from the add-node menu's
   library manager + all 411 types), `--describe-node <type>...|--all --json` (instantiated generators; whole set in
   ~2 s), `--validate <ptex>... --json` (unknown types, connection checks, then SPIR-V compile of every output of
@@ -111,13 +109,22 @@
   now merges engine data (`--static` = old path); `catalog.json`/`NODES.md` regenerated (engine_vs_static: only
   comment_line, webcam differ; ~400 parameter defaults corrected, reroute/portal ports `any`). 44 mmx tests pass
   (`TestRealEngine` ~1 min; `MMX_SKIP_ENGINE=1` skips it).
+  Docs: `agent_tools/README.md` ("Engine CLI modes", new codes), CLAUDE.md, SKILL.md + AGENTS.md (validate step).
+  Sanity: `mmx validate bricks` → static+engine ok (1.6 s, 34 outputs); `mmx run bricks --size 256` ok (2 s).
+  Findings: describing generators needs them in the tree under an MMGenGraph parent (linked remote params and
+  switch ports are set up in `_ready`), except comment/comment_line/material_export; buffers compile shaders in
+  `_ready`, so describe/validate need a GPU context (no `--headless`); structural errors cascade into shader
+  errors, so the compile check only runs on otherwise-clean graphs.
+
+## In progress
+- None.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 3.1 per ROADMAP.md "### 3.1" (plan mode first): add engine-backed CLI modes `--list-nodes --json`,
-  `--describe-node <type> --json`, `--validate <ptex> --json` (in `parse_args.gd` or a script it delegates to;
-  reuse its `--json`/exit-code/stderr conventions and add GUT tests next to `test/test_parse_args.gd`);
-  regenerate `agent_tools/catalog.json` + `agent_docs/NODES.md` from them; make `mmx validate` call the engine
-  version (keep the Python one as a fast pre-check). mmx already runs from source (`mode = "source"`).
+- Session 4.1 per ROADMAP.md "### 4.1" (plan mode first): render any node's output (preview rendering).
+  Useful from 3.1: `cli_inspect.gd` shows how to load a .ptex and walk generators/outputs outside the editor
+  (`compile_output` mirrors `MMGenBase.render_output_to_texture` minus the render), and parse_args.gd's
+  `--json`/exit-code conventions. Tests: GUT `-gtest=res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
+  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py`.

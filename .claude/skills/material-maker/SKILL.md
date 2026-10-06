@@ -33,7 +33,9 @@ Reference, read on demand (don't inline them into your context all at once):
    `agent_tools/proto_0.3/g.py` (`Graph(path).set(node, **params)`, `.add(name, type, **params)`,
    `.wire(from, port, to, port)` which replaces whatever fed that input, `C(r,g,b)`, `G(...)`).
 4. **Validate**: `python3 agent_tools/mmx.py validate <ptex>`. Fix every error; read warnings
-   (`overridden_parameter` means your edit will be thrown away on load).
+   (`overridden_parameter` means your edit will be thrown away on load). After the Python checks pass
+   it runs the engine's check (~2 s), which catches shader compile errors (`shader_compile_error`
+   names the faulty node); use `--fast` to skip it for quick structural checks between edits.
 5. **Run**: `python3 agent_tools/mmx.py run <ptex> --run-name <run> --note "what changed and why"`.
    Creates `agent_runs/<run>/iter_NNN/` with a ptex copy, `out/` (Unity/URP maps + `.mat`),
    `sheet.png`, `mmx_result.json`. `--run-name` may nest (`1.3/desert`). ~2–8 s per export.
