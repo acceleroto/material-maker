@@ -236,9 +236,12 @@ static func coerce_parameter(def : Dictionary, v : Variant) -> Dictionary:
 		"float":
 			if v is int or v is float:
 				return { value=float(v), error="" }
-			if v is String and v != "":
-				return { value=v, error="" }  # an expression, e.g. "$time"
-			return { value=null, error="%s is a float (number or expression string), got %s" % [ label, JSON.stringify(v) ] }
+			if v is String and v.is_valid_float():
+				return { value=v.to_float(), error="" }
+			# Strings are pasted into the shader as GLSL: only accept expressions of MM variables
+			if v is String and (v.contains("$") or v.contains("rnd")):
+				return { value=v, error="" }
+			return { value=null, error="%s is a float (a number, or an expression of $ variables such as \"$time*0.1\"), got %s" % [ label, JSON.stringify(v) ] }
 		"enum":
 			var values : Array = def.get("values", [])
 			if v is String:
