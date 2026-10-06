@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 1.3 (complete)
+**Current session:** Setup B (complete); next 2.1
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -70,6 +70,14 @@
   (Unity `_height.png` = 1 − depth); `tiler.scale_x/y` are fractions of the whole texture; unconnected inputs read as 0
   and `validate` doesn't flag them (cheap follow-up: warn on used nodes with unconnected inputs).
 
+- Checkpoint 1 / Setup B (user, 2026-10-06): continuing to Phase 2. Godot 4.7.2 imported the project
+  (Game Embed Mode disabled), MM runs from source (F5). Agent check: from-source export
+  `Godot --path <REPO> --export-material --target "Unity/URP" -o <abs out> <abs bricks.ptex>` works from the Bash
+  tool without `steam_appid.txt`: exit 0, ~11 s (release ~5 s), all 5 maps + `.mat`, and every PNG is
+  **byte-identical** to the release export (`agent_runs/0.2/baseline`). Log noise: Steam API init errors (no Steam),
+  thread/semaphore warnings, leak messages at exit. The editor import rewrote 16 `.import` files + `project.godot`
+  line order (default keys only), committed separately. macOS has no `timeout` command (use mmx's timeout).
+
 ## In progress
 - None.
 
@@ -77,8 +85,7 @@
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- **Checkpoint 1 (👤 user, ~15 min)** per ROADMAP.md "### Checkpoint 1": look at the final sheets
-  `agent_runs/1.3/{desert,steel,oak}/iter_006/sheet.png` (+ each `summary.md`), read `agent_docs/phase1_report.md`,
-  and try the skill in a fresh Claude Code session ("make me a <material>"). Then decide: stop here, or continue to
-  Setup B + Session 2.1 (Phase 2). Optional small agent task before 2.1: `mmx validate` warning for nodes whose output
-  is used but which have unconnected inputs.
+- Session 2.1 per ROADMAP.md "### 2.1" (plan mode first): in `parse_args.gd`, honour `--size`, exit codes
+  (0/1/2/3 via `get_tree().quit(code)`), `--json` summary line + `--strict-target`, errors to stderr; GUT tests
+  under `test/`; implement mmx `mode = "source"` (config already in `agent_tools/mmx.toml` `[source]`) using the
+  exit codes/JSON. The source invocation above is confirmed working.

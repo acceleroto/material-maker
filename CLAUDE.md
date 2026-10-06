@@ -45,6 +45,8 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 - Repo:              `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`
 - Godot 4.7.2:       `/Applications/Godot.app/Contents/MacOS/Godot`
 - Material Maker:    `/Applications/Material Maker.app/Contents/MacOS/Material Maker`
+- From source (since Setup B): `<Godot> --path <Repo> --export-material --target "Unity/URP" -o <abs dir> <abs .ptex>`
+  (works from Bash, ~11 s, output identical to the release). macOS has no `timeout` command.
 - MM release data:   `/Applications/Material Maker.app/Contents/MacOS/` (library, nodes, export, ...)
 - Unity project:     `/Volumes/External1/Users/bryan/Documents/MM-Agent-Test`
 - OS: macOS Tahoe 26.3.1(a). Note `$HOME` is `/Volumes/External1/Users/bryan`.
