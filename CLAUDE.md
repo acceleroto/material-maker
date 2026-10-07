@@ -76,6 +76,10 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
   registered in `.mcp.json`); render tools return images. Prefer it for material iteration when loaded;
   `python3 agent_tools/mcp_server.py --check` tests the engine start. README "MCP server" (also Codex setup).
   Since 5.3 a crash/timeout restarts the engine and restores the last loaded/saved graph + edits (MMClient).
+- Reference photos (since 6.1): `mmx palette <photo>` (dominant colours + paste-ready colorize gradient),
+  `mmx run ... --ref <photo>` (photo beside the 3D preview + palette strips on every sheet of the run),
+  `mmx compare <preview png> --ref <photo>`. The photo is a target, never a graph input; user photos in
+  `agent_refs/` (gitignored). Workflow: SKILL.md "Matching a reference photo".
 - Component overview: `agent_docs/ARCHITECTURE.md`.
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
   `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).

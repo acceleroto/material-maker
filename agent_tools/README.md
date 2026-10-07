@@ -237,6 +237,37 @@ assumes OpenGL (+Y) normals; additional `material_export` nodes' files aren't pr
 first material node is checked. The `parse_args.gd` additional-export branch (export nodes) wasn't
 exercised in Session 2.1 (no example uses one).
 
+## Reference photos (Session 6.1): `palette`, `compare`, `run --ref`
+
+A reference photo is the *target* the agent compares against; it never goes into the graph. Keep the
+user's photos in `agent_refs/` (gitignored). All three commands need Pillow (re-exec into `.venv`).
+
+**palette** `mmx palette <photo> [-n 6] [--crop L,T,R,B] [--swatch PNG | --no-swatch]`: downscales to 192 px
+(long side), median cut + k-means (`Image.quantize`, 8 rounds) into `n` colours (2..12, default 6; fewer if the
+image has fewer). EXIF rotation applied, alpha composited on black, `--crop` in fractions of the image.
+Prints `colors` [{hex, rgb, share, luma}] by share (luma = Rec. 709, 0..1), `luma` {mean, std, p05, p95} of
+the whole (cropped) image, `gradient`: an MM `Gradient` value (`interpolation` 1) with every colour dark →
+light at the midpoint of its cumulative share, so a colorize fed a uniformly distributed grayscale reproduces
+the photo's shares. MM stores gradient colours as the albedo PNG's sRGB bytes / 255 (checked: a gradient of
+palette colours gave the photo's luma mean within 0.002). Swatch default `agent_runs/palette/<stem>.png`.
+
+**compare** `mmx compare <preview.png> --ref <photo> [--albedo PNG] [--width 1536] [--out PNG]`: one PNG with
+[reference, centre square | preview] scaled to `--width`, labels, and palette strips (reference; albedo
+if given; swatches dark → light, width = share, `luma mean ± std`). For previews made outside `mmx run`
+(`mmx preview`, MCP `render_preview`). Default output `<preview stem>_vs_ref.png` next to the preview. Prints
+`compare`, `reference_palette`, `reference_luma` (+ `albedo_palette`, `albedo_luma`).
+
+**run --ref / sheet --ref**: `mmx run ... --ref <photo>` copies the photo to `agent_runs/<run>/reference.<ext>`
+(replacing an older `reference.*`); every sheet of that run (later `run`s without `--ref`, `mmx sheet <iter>/out`)
+finds it (`find_reference`: `<dir>/..`, `<dir>/../..`, `<dir>`), so the top block of the sheet is the `compare`
+image with the exported albedo's strip. The result JSON adds `reference`, `reference_palette`, `albedo_palette`,
+`reference_luma`, `albedo_luma`. Without a 3D preview the reference alone fills the top row.
+
+Limitations: the palette counts pixels, so large flat areas dominate and small accents (a few % of the
+image) may merge into neighbours; raise `-n` or `--crop` onto them. A photo's palette includes its
+lighting (shadows, highlights), so expect an albedo to be somewhat flatter; nothing here measures shape,
+scale or roughness — those are judged by eye (SKILL.md "Matching a reference photo").
+
 ## Server mode (Session 5.1): `--serve` + `mm_client.py`
 
 `<Godot> --path <repo> --serve` (`cli_serve.gd`) is a long-running engine process that keeps one graph loaded.

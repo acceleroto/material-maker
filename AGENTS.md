@@ -61,6 +61,7 @@ Without the MCP server, use `mmx` as written below.
 
 1. **Restate the request** as 3–6 checkable traits: macro shape/pattern, colour palette, surface
    relief, roughness/metal, style (realistic vs stylized), scale (how many features per tile).
+   With a reference photo, also follow "Matching a reference photo" below.
 2. **Start from the closest existing graph**, never from an empty file. Look in
    `material_maker/examples/*.ptex` (list them; names are descriptive: `dry_earth`, `wooden_floor`,
    `wood`, `rusted_metal`, `stone_wall`, `tiles`, `marble`, `metal_pattern*`, ...) and
@@ -109,6 +110,54 @@ Without the MCP server, use `mmx` as written below.
 When you stop, write `agent_runs/<run>/summary.md`: final iteration, which traits match, what's
 still off, seconds per iteration. Point the user at the final `sheet.png` and `out/`.
 
+### Matching a reference photo
+
+The photo is the **target to match, never an input**: don't load it into an `image` node or wire it into
+the graph (the result must stay procedural, tileable and resolution-independent). The user's photos live in
+`agent_refs/` (gitignored) unless they give another path.
+
+Setup:
+- **Look at the photo** (Read it) and restate the traits from it along the five axes below. Separate the
+  material from the lighting: baked shadows, highlights, perspective and vignetting are not albedo.
+- **Palette:** `python3 agent_tools/mmx.py palette <photo> [-n 8] [--crop L,T,R,B]` prints the dominant
+  colours (hex, share, luma) by share, `luma` mean/std/p05/p95 and a paste-ready `gradient` (all colours
+  dark → light, each at its cumulative-share midpoint). Usually split it by component: darker entries into
+  the crevice/mortar `colorize`, lighter ones into the main surface's (raise `-n` to separate them). `--crop`
+  (fractions) skips background or samples one component (e.g. a single stone). Gradient colours land 1:1 in
+  the albedo PNG, so the hex values can be used as-is. Swatch PNG: `agent_runs/palette/<photo stem>.png`.
+- **Choose the start graph against the photo:** `mmx preview <example> --size 256 --out <png>`, then
+  `mmx compare <png> --ref <photo>` (one image: photo | preview + palette strip) for each candidate.
+- **First run:** `mmx run <ptex> --run-name <run> --ref <photo>` copies the photo to
+  `agent_runs/<run>/reference.<ext>`; every later `mmx run` / `mmx sheet` of that run picks it up. The sheet's
+  top row becomes [reference (centre square) | 3D preview], followed by palette strips for the reference and
+  the exported albedo (hex, share, luma mean ± std). The result JSON has `reference_palette`, `albedo_palette`,
+  `reference_luma`, `albedo_luma`.
+- **With the MCP tools:** after `render_preview` (its result names the PNG), run
+  `mmx compare <png> --ref <photo> [--albedo <exported _albedo.png>]` and Read the image.
+
+Compare along these axes, roughly in this order (fixing a later one is wasted while an earlier one is off):
+1. **Scale:** features per tile. Count them in the photo (bricks per row and column, planks, cracks across)
+   and set the generator to match; assume the photo's centre square ≈ one tile unless the user says otherwise.
+2. **Shape:** silhouettes and layout (running bond vs random, chipped vs rounded edges, crack branching,
+   straight vs warped).
+3. **Coverage:** how much of each component (mortar vs stone, moss, rust patches, dirt in crevices). The
+   palette shares give a number to compare (e.g. the photo's darkest 22% vs the albedo's).
+4. **Palette:** hue and value per component. Aim for albedo luma mean within ~0.03 of the photo's. A photo
+   includes shading, so a rough surface's albedo should have a somewhat lower std than the photo; judge the
+   overall impression from photo vs 3D preview, the numbers from the two palette strips.
+5. **Roughness and relief:** read them off the photo's light: small sharp highlights = smooth or wet, broad
+   dull sheen = rough; shadow length in crevices = relief depth. Compare with the sphere's highlights and
+   the plane's shadows.
+
+Expectations:
+- Aim for a **convincing match**: the same material at a glance, at the same scale, with a similar palette and
+  wear. Not a pixel copy: individual stones, cracks and stains won't line up and aren't worth chasing, and
+  one-off features (a specific stain, a logo) are out of scope for a tileable procedural material.
+- **After ~4 iterations, stop and ask the user to steer:** show the latest sheet (photo beside the preview),
+  list what matches, the 1–3 biggest remaining differences and what you'd change next, and ask what matters
+  most to them (or whether it's good enough). Continue with their answer, within the 8-iteration cap.
+- In `summary.md`, include reference vs albedo luma and palette, and which differences are left on purpose.
+
 ### Reading the contact sheet
 
 **Top row: 3D preview — the primary image to judge.** Material Maker's own 3D preview (the editor's
@@ -119,6 +168,9 @@ and specular highlights, metal, how strong the relief really reads, and scale on
 and environment every iteration, so compare iterations side by side. Quick look without exporting:
 `python3 agent_tools/mmx.py preview <ptex>` (→ `agent_runs/preview/<name>.png`; `--mesh cube`,
 `--env "Epping Forest"` to vary, but keep the defaults for iteration-to-iteration comparisons).
+
+With a reference photo (`mmx run --ref`), the photo sits left of the 3D preview and two palette strips
+follow (reference, then the exported albedo; swatches dark → light, width = share).
 
 Map tiles below it, left to right, top to bottom (only maps that were exported appear):
 - **lit**: crude Python Lambert preview of the exported maps (light from the top-left, albedo × N·L × AO).

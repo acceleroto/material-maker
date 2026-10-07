@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 5.3 (complete); next 6.1
+**Current session:** 6.1 (complete); next 6.2
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -232,6 +232,23 @@
   timeouts + recovery, MCP), SKILL.md + AGENTS.md (recovery, save often, heed warnings), CLAUDE.md.
   Not done: the in-chat check of `mcp__material-maker__*` (this session again started outside the repo root).
 
+- 6.1 (agent, 2026-10-07): reference photos as the *target* (never a graph input). `mmx palette <photo> [-n 6]
+  [--crop L,T,R,B]`: median cut + k-means on a 192 px copy → colours {hex, rgb, share, luma} by share, luma
+  mean/std/p05/p95, and a paste-ready MM `Gradient` (colours dark → light at cumulative-share midpoints) + swatch PNG
+  (`agent_runs/palette/`). `mmx compare <preview png> --ref <photo> [--albedo]`: [photo centre square | 3D preview] +
+  palette strips (for `mmx preview`/MCP renders). `mmx run --ref <photo>` copies it to `agent_runs/<run>/reference.<ext>`;
+  every later sheet of the run (also `mmx sheet`, `--ref` there too) puts it beside the 3D preview with reference +
+  albedo palette strips; result JSON gains `reference`, `reference_palette`, `albedo_palette`, `reference_luma`,
+  `albedo_luma`. `agent_refs/` gitignored (user photos). SKILL.md + AGENTS.md (regenerated from the skill, in sync):
+  "Matching a reference photo" (setup, compare scale → shape → coverage → palette → roughness/relief, convincing match
+  not pixel copy, stop and ask the user to steer after ~4 iterations); README "Reference photos"; CLAUDE.md;
+  ARCHITECTURE.md. Tests: mmx 61 pass (new `TestPalette` 3 + run-reference test; real engine incl.).
+  **Test photo:** ambientCG `Bricks076C` 1K colour map (CC0, user OK'd the download) in `agent_refs/`. Run
+  `agent_runs/6.1/stone/` (summary.md): iter 1 stock bricks (baseline), `mmx compare` on stone_wall vs medieval_wall
+  candidates → stone_wall; iter 2 bricks 8×6 + mortar 0.1 + palette gradients split mortar/stone → scale, layout and
+  palette match (albedo luma 0.308 vs photo 0.306, which also confirms gradient colours land 1:1 in the albedo PNG);
+  iter 3 mossy mortar + wider stone range. Left: per-stone mottling, moss creeping onto stones, chipped faces.
+
 ## In progress
 - None.
 
@@ -239,8 +256,11 @@
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 6.1 per ROADMAP.md "### 6.1" (photo references): `mmx palette <photo>` (5–8 dominant colours as hex + share),
-  a contact-sheet option placing the reference photo beside the 3D preview, a photo workflow in SKILL.md + AGENTS.md;
-  test with a CC0 photo (ask the user for one if none is in the repo); commit; PROGRESS next 6.2. Also once: start
-  Claude Code in the repo root and try `mcp__material-maker__load` + `render_preview` to confirm images show in chat.
+- Session 6.2 per ROADMAP.md "### 6.2" (Unity hand-off): needs the user's Unity editor executable path first (Unity Hub →
+  Installs → ⚙ → Show in Finder) and the Unity editor closed. Then `mmx to-unity <ptex> --project <UNITY PATH> --name
+  <MaterialName>` exporting into `Assets/Materials/Generated/<MaterialName>/`, plus an optional batchmode verification
+  (Editor script via `-batchmode -quit -executeMethod`, log to a file); stop and tell the user if licensing blocks it.
+  Commit; PROGRESS next 6.3.
+- Still open (carried over): start Claude Code in the repo root once and try `mcp__material-maker__load` +
+  `render_preview` to confirm images show in chat; with it, try `mmx compare` on an MCP render.
 - Still open for the user: Checkpoint 4 review (`agent_docs/phase1_report.md` vs `agent_docs/phase4_report.md`).

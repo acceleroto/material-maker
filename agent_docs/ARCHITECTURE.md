@@ -40,12 +40,13 @@ plan and history: `ROADMAP.md`, `PROGRESS.md`.
   around two engine hangs (freeing nodes during renders; export replacing the Material preview textures).
 - Tests: GUT `test/test_parse_args.gd`, `test_cli_inspect.gd`, `test_cli_serve.gd` (parsing and value coercion).
 
-## Python side (`agent_tools/`, stdlib only except Pillow for sheets in `.venv`)
+## Python side (`agent_tools/`, stdlib only except Pillow for sheets/palettes in `.venv`)
 - **`mmx.toml`**: Godot/MM paths, mode (`source`), target (Unity/URP), timeouts, preview defaults.
 - **`mmx.py`**: file-based workflow, one engine launch per step: `validate` (Python schema checks against
   `catalog.json`, then engine `--validate`), `export`, `preview`, `node-preview`, `sheet` (contact sheet: 3D preview
   + maps), `run` (an `iter_NNN/` folder per iteration), `wait`, `catalog` (regenerates `catalog.json` + `NODES.md`
-  from `--list-nodes`/`--describe-node`), `node`.
+  from `--list-nodes`/`--describe-node`), `node`; reference photos (Pillow only, no engine): `palette`, `compare`,
+  `run --ref` (the run's `reference.*` beside the 3D preview + palette strips on every sheet).
 - **`mm_client.py`**: `MMClient` drives one `--serve` process: request ids, noise filtering, per-method timeouts,
   and crash recovery: on a timeout or crash it restarts the engine, reloads the last loaded/saved graph and replays
   the edits made since. CLI `batch` and `bench`.
