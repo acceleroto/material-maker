@@ -153,37 +153,173 @@ def _generated_file(name, fn):
     return re.match(r"^%s(\.mat|_[a-z_]+\.png)(\.meta)?$" % re.escape(name), fn) is not None
 
 
+COLOUR_MAPS = ("albedo", "emission")   # sRGB; everything else is data (linear) or a normal map
+
+TEXTURE_META = """fileFormatVersion: 2
+guid: {guid}
+TextureImporter:
+  internalIDToNameTable: []
+  externalObjects: {{}}
+  serializedVersion: 13
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 1
+    sRGBTexture: {srgb}
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+    flipGreenChannel: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  vTOnly: 0
+  ignoreMipmapLimit: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: {max_size}
+  textureSettings:
+    serializedVersion: 2
+    filterMode: 1
+    aniso: 1
+    mipBias: 0
+    wrapU: 0
+    wrapV: 0
+    wrapW: 0
+  nPOTScale: 1
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 0
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {{x: 0.5, y: 0.5}}
+  spritePixelsToUnits: 100
+  spriteBorder: {{x: 0, y: 0, z: 0, w: 0}}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 0
+  spriteTessellationDetail: -1
+  textureType: {texture_type}
+  textureShape: 1
+  singleChannelComponent: 0
+  flipbookRows: 1
+  flipbookColumns: 1
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  ignorePngGamma: 0
+  applyGammaDecoding: 0
+  swizzle: 50462976
+  cookieLightType: 0
+  platformSettings:
+  - serializedVersion: 4
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: {max_size}
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  spriteSheet:
+    serializedVersion: 2
+    sprites: []
+    outline: []
+    physicsShape: []
+    bones: []
+    spriteID:
+    internalID: 0
+    vertices: []
+    indices:
+    edges: []
+    weights: []
+    secondaryTextures: []
+    nameFileIdTable: {{}}
+  mipmapLimitGroupName:
+  pSDRemoveMatte: 0
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+"""
+
+
+def png_size(path):
+    """(width, height) from the PNG header, or None."""
+    with open(path, "rb") as f:
+        head = f.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def texture_settings(png_name, size=None):
+    """Import settings for one exported map, from its suffix: albedo/emission sRGB colour, normal → NormalMap
+    (linear), anything else (metal_smoothness, occlusion, height, maskmap) linear data. max_size is the
+    smallest power of two ≥ the image (32..16384) so Unity never downscales the export."""
+    role = re.sub(r"\.png$", "", png_name).rsplit("_", 1)[-1]
+    if png_name.endswith("_metal_smoothness.png"):
+        role = "metal_smoothness"
+    longest = max(size) if size else 2048
+    max_size = 32
+    while max_size < min(longest, 16384):
+        max_size *= 2
+    return {"role": role, "texture_type": 1 if role == "normal" else 0,
+            "srgb": 1 if role in COLOUR_MAPS else 0, "max_size": max_size}
+
+
+def texture_meta(guid, settings):
+    """A well-formed Unity texture .meta. MM's own Unity templates indent nested blocks with tabs (invalid
+    YAML) or not at all (normal map), so Unity ignores every nested setting in them, e.g. sRGB is left on
+    for data maps."""
+    return TEXTURE_META.format(guid=guid, **{k: settings[k] for k in ("srgb", "max_size", "texture_type")})
+
+
 def sync_into_project(stage, dest, name):
     """Copy the staged export (stage/<name>.mat, <name>_*.png + .meta) into dest. Existing GUIDs win:
     a texture whose .meta is already in dest keeps that GUID (the new .mat is rewritten to match), and
-    <name>.mat.meta is kept (or created) so the material's own GUID is stable. Maps the new export no longer
-    produces are removed. Returns {"files", "kept_guids", "new_guids", "removed", "material_guid"}."""
+    <name>.mat.meta is kept (or created) so the material's own GUID is stable. Texture metas are rewritten
+    (texture_meta). Maps the new export no longer produces are removed.
+    Returns {"files", "kept_guids", "new_guids", "removed", "textures", "material_guid"}."""
     stage, dest = Path(stage), Path(dest)
     mat = stage / (name + ".mat")
     if not mat.exists():
         raise HandoffError("staged export has no %s" % mat.name)
     dest.mkdir(parents=True, exist_ok=True)
     mat_text = mat.read_text()
-    new_files = sorted(f.name for f in stage.iterdir() if _generated_file(name, f.name))
-    kept, fresh, out = [], [], []
-    for fn in new_files:
-        if not fn.endswith(".png.meta"):
-            continue
-        text = (stage / fn).read_text()
-        new_guid = _meta_guid(stage / fn)
-        old_guid = _meta_guid(dest / fn) if (dest / fn).exists() else None
-        if old_guid and new_guid and old_guid != new_guid:
-            text = text.replace(new_guid, old_guid)
+    pngs = sorted(f.name for f in stage.iterdir() if _generated_file(name, f.name) and f.name.endswith(".png"))
+    kept, fresh, out, textures = [], [], [], {}
+    for fn in pngs:
+        new_guid = _meta_guid(stage / (fn + ".meta"))
+        if not new_guid:
+            raise HandoffError("staged export has no GUID for %s (missing %s.meta)" % (fn, fn))
+        old_guid = _meta_guid(dest / (fn + ".meta")) if (dest / (fn + ".meta")).exists() else None
+        guid = old_guid or new_guid
+        if old_guid and old_guid != new_guid:
             mat_text = mat_text.replace(new_guid, old_guid)
-            kept.append(fn[:-5])
-        else:
-            fresh.append(fn[:-5])
-        (dest / fn).write_text(text)
-        out.append(fn)
-    for fn in new_files:
-        if fn.endswith(".png"):
-            shutil.copyfile(stage / fn, dest / fn)
-            out.append(fn)
+            kept.append(fn)
+        elif not old_guid:
+            fresh.append(fn)
+        settings = texture_settings(fn, png_size(stage / fn))
+        textures[fn] = settings
+        shutil.copyfile(stage / fn, dest / fn)
+        (dest / (fn + ".meta")).write_text(texture_meta(guid, settings))
+        out += [fn, fn + ".meta"]
     (dest / mat.name).write_text(mat_text)
     out.append(mat.name)
     mat_meta = dest / (mat.name + ".meta")
@@ -198,29 +334,40 @@ def sync_into_project(stage, dest, name):
             f.unlink()
             removed.append(f.name)
     return {"files": sorted(out), "kept_guids": kept, "new_guids": fresh, "removed": removed,
-            "material_guid": mat_guid}
+            "textures": textures, "material_guid": mat_guid}
 
 
 # ---------------------------------------------------------------------------
 # batchmode verification
 # ---------------------------------------------------------------------------
 
+# Lines that mean "no usable license" (a working batchmode log also has [Licensing::Module] lines, even
+# "Error: Access token is unavailable", so those alone mean nothing).
 LICENSE_PATTERNS = ("No valid Unity Editor license", "License is not active", "license is not valid",
-                    "LICENSE SYSTEM", "Licensing::Module", "Failed to activate", "entitlement",
-                    "Unity Editor license")
+                    "has not been activated", "Failed to activate", "No ULF license found",
+                    "Unity Editor license", "sign in to Unity Hub", "LicensingClient has failed")
 
 
-def editor_processes(project):
-    """PIDs of Unity editors (not import workers) that have this project open."""
-    try:
-        ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
+def editor_processes(project, ps_text=None):
+    """PIDs of Unity editors (not import workers) that have this project open: processes whose executable
+    is …/Unity.app/Contents/MacOS/Unity with -projectPath/-createProject <project> (other processes that
+    merely mention both paths, e.g. a shell running this tool, don't count)."""
+    if ps_text is None:
+        try:
+            ps_text = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True,
+                                     timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return []
+    want = os.path.realpath(str(project)).rstrip("/")
+    arg = re.compile(r"\s-(?:projectPath|createProject)\s+(.+?)(?=\s-\w|$)", re.I)
     pids = []
-    for line in ps.splitlines():
+    for line in ps_text.splitlines():
         pid, _, cmd = line.strip().partition(" ")
-        # import workers belong to an editor (they also carry -projectPath); any other Unity process locks it
-        if "Unity.app/Contents/MacOS/Unity" in cmd and str(project) in cmd and "AssetImportWorker" not in cmd:
+        exe = re.split(r"\s-", cmd, maxsplit=1)[0].strip()
+        if not exe.endswith("Unity.app/Contents/MacOS/Unity") or "AssetImportWorker" in cmd:
+            continue  # import workers belong to an editor and also carry -projectPath
+        m = arg.search(cmd)
+        if m and os.path.realpath(m.group(1).strip().strip('"')).rstrip("/") == want:
             pids.append(int(pid))
     return pids
 
@@ -250,7 +397,7 @@ def verify(editor, project, folder, work_dir, timeout=900):
     """Run the batchmode verification of `folder` (Assets/...). Returns {"ok", "report", "log", "seconds",
     "exit_code", "error"?, "license_lines"?}."""
     project = Path(project)
-    work_dir = Path(work_dir)
+    work_dir = Path(work_dir).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     report_path, log_path = work_dir / "unity_verify.json", work_dir / "unity_verify.log"
     report_path.unlink(missing_ok=True)

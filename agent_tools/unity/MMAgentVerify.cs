@@ -24,6 +24,9 @@ public static class MMAgentVerify
         public bool assigned;
         public string importer_type;
         public bool srgb;
+        public bool mipmaps;
+        public int max_size;
+        public string wrap;
         public int width;
         public int height;
     }
@@ -205,6 +208,12 @@ public static class MMAgentVerify
             {
                 t.importer_type = imp.textureType.ToString();
                 t.srgb = imp.sRGBTexture;
+                t.mipmaps = imp.mipmapEnabled;
+                t.max_size = imp.maxTextureSize;
+                t.wrap = imp.wrapMode.ToString();
+                imp.GetSourceTextureWidthAndHeight(out int srcW, out int srcH);
+                if (t.width > 0 && Math.Max(srcW, srcH) > Math.Max(t.width, t.height))
+                    r.warnings.Add(t.path + " is downscaled on import (" + srcW + "x" + srcH + " -> " + t.width + "x" + t.height + ")");
                 string file = Path.GetFileNameWithoutExtension(t.path);
                 if (file.EndsWith("_normal") && imp.textureType != TextureImporterType.NormalMap)
                     r.errors.Add(t.path + " is a normal map but imported as " + imp.textureType);
