@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 6.2 (complete); next 6.3
+**Current session:** 6.3 (in progress)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -272,7 +272,9 @@
   regenerated from the skill), CLAUDE.md, ARCHITECTURE.md.
 
 ## In progress
-- None.
+- 6.3 acceptance run: text 1-3 done + delivered (GraniteCliff 7 it., ChippedPaintMetal 6, StylizedLava 5; runs in
+  `agent_runs/6.3/<run>/`, previews in `agent_docs/acceptance/`). Photos downloaded (CC0 ambientCG Bark012, Planks023A in
+  `agent_refs/`). Left: text 4 (sci-fi panels), text 5 (marble tiles), photos, `--verify`, ACCEPTANCE.md.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
