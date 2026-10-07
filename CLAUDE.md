@@ -72,6 +72,9 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
   load/save/list_nodes/describe_node/add_node/remove_node/connect/disconnect/set_param/get_graph/validate/
   render_output/render_preview/export/shutdown); Python client `agent_tools/mm_client.py` (`MMClient`, `batch`, `bench`).
   ~0.5 s per edit+preview vs ~4–7 s relaunching; outputs byte-identical to the CLI. README "Server mode".
+- MCP server (since 5.2): `agent_tools/mcp_server.py` wraps `--serve` as MCP tools (`mcp__material-maker__*`,
+  registered in `.mcp.json`); render tools return images. Prefer it for material iteration when loaded;
+  `python3 agent_tools/mcp_server.py --check` tests the engine start. README "MCP server" (also Codex setup).
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
   `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).
 

@@ -325,6 +325,55 @@ server (`MMError("timeout")`); a dead server raises `server_died`. `close()` / t
 Tests: `agent_tools/.venv/bin/python -m unittest agent_tools/test_mm_client.py` (fake server for the protocol,
 real server ~25 s; `MMX_SKIP_ENGINE=1` skips it); GUT `res://test/test_cli_serve.gd` (request parsing, value coercion).
 
+## MCP server (Session 5.2): `mcp_server.py`
+
+`agent_tools/mcp_server.py` (stdlib only) is a stdio MCP server on top of the engine server: one tool per
+`--serve` method (`load`, `save`, `list_nodes`, `describe_node`, `add_node`, `remove_node`, `connect`, `disconnect`,
+`set_param`, `get_graph`, `validate`, `render_output`, `render_preview`, `export`) with JSON schemas and descriptions,
+plus `batch` (a list of `{"method", "params"}` run in order, stops at the first failure, returns every step's result
+and the images of render steps) and `restart`. `render_preview` / `render_output` return the PNG as an MCP
+`image` content block (plus the JSON result as text), so the agent sees it without reading a file
+(`return_image: false` skips it; a 2×512 preview is ~0.5 MB).
+- The engine starts on the first tool call that needs it (~1.3–2 s) and stays up for the session. Engine stderr:
+  `agent_runs/mcp/engine.log`. A `timeout` (mmx.toml `timeout`, 180 s) or crash kills it; the error says so and
+  the next call starts a new engine (the graph must be loaded again; unsaved edits are lost).
+- Relative paths resolve against the repo root. Omitted outputs go to `agent_runs/mcp/<graph stem>/`:
+  `preview_NNN.png`, `node_<node>_p<port>_NNN.png` (numbered, earlier renders are kept), `export/`
+  (prefix = graph stem, target/preview defaults from `mmx.toml`).
+- Tool failures are results with `isError: true` and text `code: message` (engine codes as in "Server mode",
+  plus `bad_params` for unknown/missing arguments, checked before the engine is called); protocol errors are
+  JSON-RPC errors. Warnings are in the result's `warnings`. Only MCP messages go to stdout.
+- MCP: protocol versions 2024-11-05 … 2025-11-25 (echoes the client's), capabilities `tools` only; tool
+  annotations mark read-only tools.
+- `python3 agent_tools/mcp_server.py --check` starts the engine once and prints its ready info (exit 0/1);
+  `--list-tools` prints the tool definitions; `--config`, `--timeout`, `--log`, `--engine-command` (tests).
+
+**Claude Code** (project scope, committed): `.mcp.json` at the repo root (written by
+`claude mcp add --scope project material-maker -- python3 <repo>/agent_tools/mcp_server.py`, absolute script
+path so it works from any subdirectory) and `"enabledMcpjsonServers": ["material-maker"]` in
+`.claude/settings.json` (no approval prompt). Tools appear as `mcp__material-maker__<tool>`; check with
+`claude mcp get material-maker` (should say Connected; that doesn't start the engine). On another machine,
+fix the path in `.mcp.json` and the paths in `mmx.toml`.
+
+**Codex** (user scope, `~/.codex/config.toml`):
+```bash
+codex mcp add material-maker -- python3 "/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker/agent_tools/mcp_server.py"
+```
+then raise the per-tool timeout (Codex default 60 s; a 2048 export of a big graph can take longer) by adding
+`tool_timeout_sec = 300` under `[mcp_servers.material-maker]` in `~/.codex/config.toml`. Equivalent by hand:
+```toml
+[mcp_servers.material-maker]
+command = "python3"
+args = ["/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker/agent_tools/mcp_server.py"]
+tool_timeout_sec = 300
+```
+Check with `codex mcp list`. AGENTS.md tells Codex to prefer these tools when present.
+
+Tests: `agent_tools/.venv/bin/python -m unittest agent_tools/test_mcp_server.py` (fake engine for the protocol,
+tool mapping, batch, crash/timeout recovery and a stdio subprocess session; one real-engine test ~5 s,
+`MMX_SKIP_ENGINE=1` skips it). Design ideas (lazy engine start, `--check` preflight, a batch tool that stops
+at the first failing op) came from graysonchalmers/Tool-MaterialMaker-MCP (MIT); no code was copied.
+
 ## Other
 - `proto_0.3/`: throwaway Session 0.3 helpers (export.sh, g.py, sheet.py), superseded by
   `mmx export/sheet/run`; kept for reference.

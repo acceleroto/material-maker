@@ -20,6 +20,28 @@ Reference, read on demand (don't inline them into your context all at once):
 - `agent_docs/examples_annotated.md`: four example graphs explained node by node.
 - `agent_tools/README.md`: mmx commands, validation codes, export/sheet details.
 
+## Prefer the MCP tools when they are available
+
+If your tool list has the `material-maker` MCP server (Claude Code: `mcp__material-maker__*`, registered in
+`.mcp.json`; Codex: see `agent_tools/README.md` "MCP server"), run the loop below through it instead of
+`mmx`: one engine stays up with the graph in memory, edits take ~0.01 s and a 3D preview ~0.5 s (vs ~6–10 s
+per `mmx run`), and render tools **return the image directly** (no Read needed). Tools: `load`, `save`,
+`get_graph`, `describe_node`, `list_nodes`, `add_node`, `remove_node`, `connect`, `disconnect`, `set_param`,
+`validate`, `render_preview` (lit 3D, the primary image to judge), `render_output` (one node, for debugging),
+`export`, `batch` (several of these in one call, stops at the first failure: e.g. two `set_param` + a
+`render_preview`), `restart`. How the steps map:
+- Step 2: `load` the example (`render_preview size=256` on candidates to choose), then `save` it to
+  `agent_runs/<run>/<name>.ptex` right away so later saves never touch `material_maker/examples/`.
+- Step 3–5: edits are `set_param` / `add_node` / `connect` (no edit scripts), `validate` after structural edits.
+- Step 6: one iteration = edits + `render_preview`; judge the returned image, write the critique, and
+  `save` to `agent_runs/<run>/iter_NNN.ptex` so every iteration is reproducible. `render_output` replaces
+  `mmx node-preview`. Paths may be repo-relative; render/export outputs default to `agent_runs/mcp/<graph>/`.
+- At the end: `validate`, `save`, `export` (Unity/URP maps + `.mat`); for a contact sheet of the final maps run
+  `mmx run <saved ptex>` once.
+- Engine errors come back as `code: message` (e.g. `unknown_parameter` lists the valid names). After a
+  `timeout`/`server_died` the next call starts a fresh engine: `load` your last saved ptex again.
+Without the MCP server, use `mmx` as written below.
+
 ## The loop (cap: 8 iterations; stop earlier when it matches)
 
 1. **Restate the request** as 3–6 checkable traits: macro shape/pattern, colour palette, surface
@@ -59,7 +81,8 @@ Reference, read on demand (don't inline them into your context all at once):
    another port. Normal-map nodes show MM's internal format (not the exported Unity normal colours).
    If several nodes must be judged together, a debug export still works: copy the ptex to
    `agent_runs/<run>/debug/dbg.ptex`, wire suspects into Material albedo (in 0), then `mmx export` + `mmx sheet`.
-   **Comparing several values of a parameter** (or many quick edits): use the engine server instead of
+   **Comparing several values of a parameter** (or many quick edits): with the MCP tools, one `batch` of
+   `set_param` + `render_preview` per value. Without them, use the engine server instead of
    repeated `mmx` runs: one process, edits in memory, ~0.5 s per 3D preview vs ~4–7 s per relaunch:
    `from mm_client import MMClient` (`agent_tools/mm_client.py`; `mm.load`, `mm.set_param`, `mm.render_preview`,
    `mm.render_output`, `mm.validate`, `mm.save`; README "Server mode"). Render each value to its own PNG, Read

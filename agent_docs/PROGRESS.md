@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 5.1 (complete); next 5.2
+**Current session:** 5.2 (complete); next 5.3
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -189,6 +189,26 @@
   mmx 57, `agent_tools/test_mm_client.py` 23 (fake server + real server ~25 s). Docs: README "Server mode", CLAUDE.md,
   SKILL.md + AGENTS.md (parameter sweeps via MMClient).
 
+- 5.2 (agent, 2026-10-07): stdio MCP server `agent_tools/mcp_server.py` (stdlib only, own JSON-RPC 2.0 over
+  newline-delimited stdio; protocol 2024-11-05…2025-11-25, echoes the client's) on top of `MMClient`: 14 tools = the
+  `--serve` methods (shutdown → `restart`) + `batch` (ops in order, stops at the first failure, returns all render
+  images). Schemas with `additionalProperties: false`; unknown/missing args → `bad_params` before the engine is called;
+  read-only annotations. `render_preview`/`render_output` return the PNG as an MCP image block (2×512 preview ≈ 0.5 MB)
+  + the JSON result. Engine starts lazily on the first tool call (~1.3–2 s) and stays up; timeout/crash → isError text
+  says the next call starts a fresh engine (graph must be reloaded). Relative paths → repo root; default outputs
+  `agent_runs/mcp/<stem>/preview_NNN.png`, `node_<node>_p<port>_NNN.png`, `export/`; engine log `agent_runs/mcp/engine.log`.
+  `--check` (start engine, print info), `--list-tools`. Registered project-scoped: `.mcp.json` (absolute script path) +
+  `enabledMcpjsonServers` in `.claude/settings.json`; `claude mcp get material-maker` → Connected. Codex: documented
+  (`codex mcp add ...` + `tool_timeout_sec = 300`), user's `~/.codex/config.toml` not modified. Reference
+  graysonchalmers/Tool-MaterialMaker-MCP is MIT; read for ideas only (lazy start, `--check`, stop-at-first-failure batch),
+  no code copied (it uses the `mcp` SDK + its own Godot socket; ours needs no dependency). Smoke run over real stdio
+  (bricks): load 0.1 s, render_preview 0.56 s, set_param 0.01 s, render_output 0.22 s, batch edit+preview(256) 0.30 s,
+  validate 0.27 s, export(256) 1.1 s. Tests: `agent_tools/test_mcp_server.py` 15 (fake engine: protocol, schemas, lazy
+  start, arg checks, image content, defaults, batch, crash/timeout recovery, stdio subprocess; real engine batch +
+  validate + export). Docs: README "MCP server" (incl. Codex), CLAUDE.md, SKILL.md + AGENTS.md ("Prefer the MCP tools
+  when they are available" section, sweeps via `batch`). Not checked: the tools inside a live Claude Code / Codex chat
+  (this session was started outside the repo, so `.mcp.json` wasn't loaded here).
+
 ## In progress
 - None.
 
@@ -196,11 +216,11 @@
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 5.2 per ROADMAP.md "### 5.2": stdio MCP server `agent_tools/mcp_server.py` wrapping the `--serve` process via
-  `agent_tools/mm_client.py` (`MMClient`; protocol, methods, error codes in `agent_tools/README.md` "Server mode"): one tool
-  per server method with JSON schemas and clear descriptions, render tools return the PNG as an image; project-scoped
-  registration for Claude Code, Codex instructions; SKILL.md/AGENTS.md prefer MCP tools when available. Read
-  "Tool-MaterialMaker-MCP" (graysonchalmers) for ideas only (check its license before copying anything). Tests:
-  GUT `-gtest=res://test/test_cli_serve.gd,res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
-  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py agent_tools/test_mm_client.py`.
+- Session 5.3 per ROADMAP.md "### 5.3" (hardening): crash recovery in `MMClient`/`mcp_server.py` (restart the engine and
+  reload the last saved graph; today `mcp_server.MaterialMakerTools._drop` just forgets the graph and asks the agent to
+  reload), timeouts, malformed requests, very large sizes, missing files; tests; run the full suite (GUT
+  `-gtest=res://test/test_cli_serve.gd,res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
+  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py agent_tools/test_mm_client.py agent_tools/test_mcp_server.py`);
+  write `agent_docs/ARCHITECTURE.md` (one page). First, start Claude Code in the repo root and try the
+  `mcp__material-maker__*` tools once (load bricks, render_preview) to confirm images show up in a real chat.
 - Still open for the user: Checkpoint 4 review (`agent_docs/phase1_report.md` vs `agent_docs/phase4_report.md`).
