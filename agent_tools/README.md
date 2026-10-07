@@ -22,8 +22,10 @@ python3 agent_tools/mmx.py preview <ptex> [--mesh sphere+plane] [--env Studio] [
 python3 agent_tools/mmx.py node-preview <ptex> --node NAME [--port N] [--size 512] [--out x.png]
 python3 agent_tools/mmx.py run <file.ptex> --run-name NAME [--note "what changed"] [--no-preview]
 python3 agent_tools/mmx.py wait (<dir> | --run-name NAME) [--timeout S]
+python3 agent_tools/mmx.py to-unity <ptex> --project <Unity root> --name NAME [--verify]   # "Unity hand-off"
 agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain python3 skips the sheet test
                                      # TestRealEngine runs Godot (~1 min); MMX_SKIP_ENGINE=1 skips it
+python3 -m unittest agent_tools/test_unity_handoff.py -v             # no Unity needed (fake editor)
 ```
 
 - **catalog**: asks the engine (`--list-nodes`, `--describe-node --all`, see "Engine CLI modes" below;
@@ -267,6 +269,50 @@ Limitations: the palette counts pixels, so large flat areas dominate and small a
 image) may merge into neighbours; raise `-n` or `--crop` onto them. A photo's palette includes its
 lighting (shadows, highlights), so expect an albedo to be somewhat flatter; nothing here measures shape,
 scale or roughness — those are judged by eye (SKILL.md "Matching a reference photo").
+
+## Unity hand-off (Session 6.2): `to-unity`
+
+`mmx to-unity <ptex> --project <Unity root> --name <Name> [--target T] [--size N] [--verify] [--unity <exe>]`
+(defaults for `--project` and `--unity` in `mmx.toml` `[unity]`; code in `unity_handoff.py`). JSON, exit 0/1;
+also written to `agent_runs/to-unity/<Name>/to_unity_result.json` (staged export in `export/` beside it).
+
+1. **Target** from the project's render pipeline: the pipeline assets set in `GraphicsSettings.asset` and every
+   `QualitySettings` level are looked up by GUID under `Assets/` and classified by their `m_Script` GUID (URP/HDRP
+   asset classes) or content; none set → Built-in (`Unity/3D`) even if the URP package is installed; asset not
+   found → the single installed pipeline package; mixed → error, pass `--target`. Result: `pipeline`, `target`.
+2. **Export** (source mode) with `--output-file <Name>`, so files are `<Name>.mat`, `<Name>_albedo.png`, ...
+   (`expected_files`/`export_command` take `output_name`).
+3. **Copy** into `Assets/Materials/Generated/<Name>/` (`sync_into_project`):
+   - GUIDs: a map whose `.meta` already exists there keeps its GUID (the new `.mat` is rewritten to it);
+     `<Name>.mat.meta` is kept, or created with a new GUID (`material_guid`), so references survive re-exports.
+     Result: `kept_guids`, `new_guids`.
+   - Texture `.meta` files are **rewritten** (`texture_meta`): MM's Unity templates indent nested blocks with
+     tabs (invalid YAML) or flatten them (normal map), and Unity ignored every nested setting (checked in batchmode:
+     data maps imported as sRGB). Ours: albedo/emission sRGB, `_normal` NormalMap (linear), every other map linear;
+     mipmaps on, wrap Repeat, bilinear, `maxTextureSize` = next power of two ≥ the PNG (never downscaled).
+     Result: `textures` {file: role, srgb, texture_type, max_size}.
+   - Files `<Name>.mat(.meta)` / `<Name>_<map>.png(.meta)` that this export didn't produce are deleted (`removed`);
+     other files in the folder are left alone.
+   - `editor_open`: PIDs of Unity editors with the project open (they import the files when focused).
+4. **`--verify`** (`verify`): refuses while an editor has the project open (`stage: editor_open`; batchmode
+   cannot open a locked project); installs `unity/MMAgentVerify.cs` as
+   `Assets/Editor/MaterialMakerAgent/MMAgentVerify.cs` (Editor-only, rewritten only when changed), then
+   `Unity -batchmode -quit -projectPath P -logFile L -executeMethod MMAgentVerify.Run -mmFolder Assets/... -mmReport R`.
+   The verifier force-imports the folder, then per material: shader found (not the error shader), compiles,
+   supported, matches the active pipeline (URP shader ↔ URP asset, Built-in shader with a pipeline = magenta);
+   every `m_Texture` GUID in the `.mat` file resolves to a loaded texture and is a property of the shader; importer
+   checks (normal map type, data maps not sRGB, downscaled on import). `verify.report` = its JSON
+   (`render_pipeline`, `assets`, `materials[{shader, textures[{property, path, resolved, importer_type, srgb,
+   mipmaps, max_size, wrap, width, height}], errors, warnings}]`); unity exit 0 ok / 1 problems / 2 bad args /
+   3 exception. Log in `agent_runs/to-unity/<Name>/unity_verify.log`. No report + a licensing line in the log →
+   `stage: license` + `license_lines` (a working log also has `[Licensing::Module]` lines; only failure phrases
+   count). Timeout `[unity] verify_timeout` (900 s; a fresh project import takes ~45 s, a warm run ~10 s).
+
+Licensing: on this machine (Unity Hub signed in, Unity 6000.5.5f1) batchmode needed no extra step: the editor
+connects to the Hub's licensing client.
+
+Tests: `test_unity_handoff.py` (pipeline detection on synthetic projects, names, GUID-keeping sync, metas, editor
+process matching, a fake Unity for verify ok/problems/license, `to_unity` with a faked export).
 
 ## Server mode (Session 5.1): `--serve` + `mm_client.py`
 

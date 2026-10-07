@@ -80,6 +80,10 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
   `mmx run ... --ref <photo>` (photo beside the 3D preview + palette strips on every sheet of the run),
   `mmx compare <preview png> --ref <photo>`. The photo is a target, never a graph input; user photos in
   `agent_refs/` (gitignored). Workflow: SKILL.md "Matching a reference photo".
+- Unity hand-off (since 6.2): `python3 agent_tools/mmx.py to-unity <ptex> --project <Unity root> --name <Name>
+  [--verify]` → `Assets/Materials/Generated/<Name>/` with the target matching the project's pipeline; GUIDs kept
+  on re-export; clean texture metas. `--verify` = Unity batchmode check (editor must be closed on that project).
+  Unity 6000.5.5f1: `/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app/Contents/MacOS/Unity` (`mmx.toml [unity]`).
 - Component overview: `agent_docs/ARCHITECTURE.md`.
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
   `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).

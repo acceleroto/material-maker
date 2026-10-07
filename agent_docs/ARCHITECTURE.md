@@ -46,7 +46,10 @@ plan and history: `ROADMAP.md`, `PROGRESS.md`.
   `catalog.json`, then engine `--validate`), `export`, `preview`, `node-preview`, `sheet` (contact sheet: 3D preview
   + maps), `run` (an `iter_NNN/` folder per iteration), `wait`, `catalog` (regenerates `catalog.json` + `NODES.md`
   from `--list-nodes`/`--describe-node`), `node`; reference photos (Pillow only, no engine): `palette`, `compare`,
-  `run --ref` (the run's `reference.*` beside the 3D preview + palette strips on every sheet).
+  `run --ref` (the run's `reference.*` beside the 3D preview + palette strips on every sheet); `to-unity`.
+- **`unity_handoff.py`** (`mmx to-unity`): detects the Unity project's render pipeline → export target, copies the
+  export into `Assets/Materials/Generated/<Name>/` keeping GUIDs and writing valid texture metas; optional batchmode
+  check with **`unity/MMAgentVerify.cs`** (installed into the project's `Assets/Editor/`).
 - **`mm_client.py`**: `MMClient` drives one `--serve` process: request ids, noise filtering, per-method timeouts,
   and crash recovery: on a timeout or crash it restarts the engine, reloads the last loaded/saved graph and replays
   the edits made since. CLI `batch` and `bench`.
@@ -54,7 +57,7 @@ plan and history: `ROADMAP.md`, `PROGRESS.md`.
   One tool per server method + `batch` + `restart`; checks arguments against the tool schemas, resolves repo-relative
   paths, picks default output paths under `agent_runs/mcp/<graph>/`, returns renders as image content. Starts the
   engine lazily on the first call.
-- Tests: `test_mmx.py`, `test_mm_client.py`, `test_mcp_server.py` (fake engines for protocol and failure paths, plus
+- Tests: `test_mmx.py`, `test_mm_client.py`, `test_mcp_server.py`, `test_unity_handoff.py` (fake engines for protocol and failure paths, plus
   real-engine tests; `MMX_SKIP_ENGINE=1` skips the latter).
 
 ## Knowledge for the agent (`agent_docs/`, `.claude/skills/`)
@@ -66,4 +69,4 @@ plan and history: `ROADMAP.md`, `PROGRESS.md`.
 ## Data flow of one iteration (MCP path)
 `load` example `.ptex` → `set_param`/`add_node`/`connect` (in memory, ~0.01 s) → `render_preview` (~0.5 s,
 image returned) → critique → `save` to `agent_runs/<run>/iter_NNN.ptex` (also the crash-recovery point) →
-at the end `validate` + `export` → Unity/URP `.mat` + PNG maps → copied into the Unity project.
+at the end `validate` + `mmx to-unity` → `.mat` + PNG maps in `Assets/Materials/Generated/<Name>/` (+ `--verify`).

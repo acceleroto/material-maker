@@ -98,6 +98,22 @@ Without the MCP server, use `mmx` as written below.
 When you stop, write `agent_runs/<run>/summary.md`: final iteration, which traits match, what's
 still off, seconds per iteration. Point the user at the final `sheet.png` and `out/`.
 
+## Handing off to Unity
+
+When the user wants the material in their Unity project (or the default one in `mmx.toml`):
+`python3 agent_tools/mmx.py to-unity <final ptex> --project <Unity project root> --name <MaterialName> [--verify]`.
+- Picks the target from the project's render pipeline (URP → `Unity/URP`, HDRP → `Unity/HDRP`, none → `Unity/3D`;
+  `--target` overrides) and writes `<Name>.mat` + `<Name>_*.png` into `Assets/Materials/Generated/<Name>/`.
+  Name: letters, digits, `_`, `-` (PascalCase like `MossyRoofTiles` reads best in Unity).
+- Re-running with the same `--name` updates the material in place: texture and material GUIDs are kept, so
+  scenes/prefabs using it stay linked; maps the graph no longer produces are removed.
+- `--verify` opens the project in Unity batchmode (~15–60 s) and reports whether the material, its shader and
+  every texture resolved, plus import settings (`verify.report`). It needs the Unity editor **closed** on that
+  project (`stage: editor_open` otherwise; without `--verify` the open editor imports the files when focused).
+  It installs `Assets/Editor/MaterialMakerAgent/MMAgentVerify.cs` (Editor-only) in the project. Tell the user if
+  the result has `stage: license` (they must sign in to Unity Hub / activate a license).
+- Report to the user: the Unity asset path (`material`), the target used, and any verify warnings.
+
 ## Matching a reference photo
 
 The photo is the **target to match, never an input**: don't load it into an `image` node or wire it into
