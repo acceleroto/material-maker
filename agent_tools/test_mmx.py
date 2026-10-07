@@ -367,6 +367,61 @@ class TestSheet(unittest.TestCase):
             self.assertEqual(list(r["sources"]), ["albedo"])
 
 
+@unittest.skipUnless(HAVE_PIL, "needs Pillow (run with agent_tools/.venv/bin/python)")
+class TestPalette(unittest.TestCase):
+    def photo(self, t, name="p.png"):
+        from PIL import Image
+        im = Image.new("RGB", (100, 100), (200, 30, 30))  # 60% red, 30% dark green, 10% white
+        im.paste((20, 80, 20), (0, 60, 100, 90))
+        im.paste((250, 250, 250), (0, 90, 100, 100))
+        path = Path(t) / name
+        im.save(path)
+        return path
+
+    def test_palette(self):
+        with tempfile.TemporaryDirectory() as t:
+            r = mmx.extract_palette(self.photo(t), n=3)
+            self.assertEqual([c["hex"] for c in r["colors"]], ["#c81e1e", "#145014", "#fafafa"])
+            self.assertEqual([c["share"] for c in r["colors"]], [0.6, 0.3, 0.1])
+            pts = r["gradient"]["points"]  # dark → light, at cumulative-share midpoints
+            self.assertEqual([p["pos"] for p in pts], [0.15, 0.6, 0.95])
+            self.assertEqual(pts[0]["g"], round(80 / 255, 4))
+            self.assertEqual(r["gradient"]["type"], "Gradient")
+            self.assertLess(r["luma"]["p05"], r["luma"]["mean"])
+            self.assertLessEqual(len(mmx.extract_palette(self.photo(t), n=8)["colors"]), 8)
+            crop = mmx.extract_palette(self.photo(t), n=3, crop=mmx._parse_crop("0,0,1,0.5"))
+            self.assertEqual([c["hex"] for c in crop["colors"]], ["#c81e1e"])
+
+    def test_bad_crop(self):
+        for bad in ("0,0,1", "0.5,0,0.4,1", "a,b,c,d", "0,0,1.5,1"):
+            with self.assertRaises(SystemExit):
+                mmx._parse_crop(bad)
+
+    def test_cli_and_compare(self):
+        import contextlib
+        import io
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as t:
+            photo = self.photo(t)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                mmx.main(["palette", str(photo), "-n", "3", "--swatch", str(Path(t) / "s.png")])
+            res = json.loads(buf.getvalue())
+            self.assertEqual(len(res["colors"]), 3)
+            self.assertTrue(Path(res["swatch"]).exists())
+            prev = Path(t) / "prev.png"
+            Image.new("RGB", (200, 100), (0, 255, 0)).save(prev)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                mmx.main(["compare", str(prev), "--ref", str(photo), "--albedo", str(photo), "--width", "300"])
+            res = json.loads(buf.getvalue())
+            self.assertEqual(res["compare"], str(Path(t) / "prev_vs_ref.png"))
+            im = Image.open(res["compare"])
+            self.assertEqual(im.width, 300)  # [100² ref | 200×100 preview] → 300 wide, + label + 2 strips
+            self.assertEqual(im.height, 22 + 100 + 40 + 40)
+            self.assertEqual(im.getpixel((250, 22 + 50)), (0, 255, 0))
+
+
 # A stand-in for Godot running cli_inspect.gd: prints the canned summary in $FAKE_ENGINE_SUMMARY
 # (or nothing with FAKE_ENGINE_MODE=nojson, or hangs with FAKE_ENGINE_MODE=hang).
 FAKE_ENGINE = """#!/usr/bin/env python3
@@ -601,6 +656,28 @@ class TestRunWithPreview(unittest.TestCase):
         self.cfg["preview_3d"], self.cfg["mode"] = True, "release"
         self.run_it()
         self.assertEqual(self.calls, [])
+
+    def test_reference_sticks_to_the_run(self):
+        from PIL import Image
+        self.preview_ok = True
+        ref = Path(self.tmp.name) / "photo.JPG"
+        Image.new("RGB", (60, 40), (0, 0, 255)).save(ref, "JPEG")
+        r1 = self.run_it(reference=ref)
+        run_dir = (Path(self.tmp.name) / "r").resolve()
+        self.assertEqual(r1["reference"], str(run_dir / "reference.jpg"))
+        self.assertEqual(len(r1["albedo_palette"]), 1)
+        r2 = self.run_it()  # no --ref: found in the run dir
+        self.assertEqual(r2["reference"], r1["reference"])
+        sheet = Image.open(r2["sheet"])
+        b = sheet.getpixel((10, 30 + 22 + 10))  # top-left: the reference photo (JPEG ≈ blue)
+        self.assertTrue(b[2] > 200 and b[0] < 40, b)
+        self.assertEqual(sheet.getpixel((sheet.width - 10, 30 + 22 + 10)), (0, 255, 0))  # right: the preview
+        png = Path(self.tmp.name) / "p2.png"
+        Image.new("RGB", (8, 8), (255, 0, 0)).save(png)
+        self.run_it(reference=png)  # replaces the old reference
+        self.assertEqual(sorted(p.name for p in run_dir.glob("reference.*")), ["reference.png"])
+        with self.assertRaises(SystemExit):
+            self.run_it(reference=Path(self.tmp.name) / "missing.png")
 
 
 class TestEngineCatalogMerge(unittest.TestCase):

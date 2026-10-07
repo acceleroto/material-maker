@@ -15,6 +15,9 @@ Subcommands:
             to debug a graph stage by stage; JSON, exit 0/1.
   sheet     Labeled contact-sheet PNG of an export dir (needs Pillow, agent_tools/.venv).
   run       One iteration: agent_runs/<run>/iter_NNN/ with ptex copy, out/, sheet.png.
+            --ref <photo> sets the run's target photo (shown beside the 3D preview on every sheet).
+  palette   Dominant colours of a reference photo (hex + share) and a ready colorize gradient.
+  compare   [reference photo | 3D preview] + palette strips as one PNG.
   wait      Poll for the result of an export/run started elsewhere (e.g. the Terminal panel).
 
 Node type resolution mirrors MMLoader.create_gen (addons/material_maker/engine/loader.gd).
@@ -1724,12 +1727,231 @@ def find_preview(directory):
     return None
 
 
-def make_sheet(directory, out=None, tile=384, cols=4, title=None, preview=None, preview_label=None):
+# ---------------------------------------------------------------------------
+# reference photos: palette + side-by-side comparison
+# ---------------------------------------------------------------------------
+
+REFERENCE_STEM = "reference"   # agent_runs/<run>/reference.<ext>: the run's target photo (mmx run --ref)
+PALETTE_SAMPLE = 192           # photos are downscaled to this many pixels on the long side before quantizing
+
+
+def _luma(rgb):
+    r, g, b = rgb
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+
+
+def _parse_crop(crop):
+    """'L,T,R,B' as fractions 0..1 → tuple, or None."""
+    if not crop:
+        return None
+    try:
+        box = tuple(float(v) for v in crop.split(","))
+    except ValueError:
+        box = ()
+    if len(box) != 4 or not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1):
+        raise SystemExit("mmx: --crop must be L,T,R,B fractions with 0 <= L < R <= 1 and 0 <= T < B <= 1")
+    return box
+
+
+def _open_rgb(path, crop=None):
+    from PIL import Image, ImageOps
+    with Image.open(path) as im:
+        im = ImageOps.exif_transpose(im)  # phone photos store rotation in EXIF
+        if im.mode in ("RGBA", "LA", "P"):
+            im = im.convert("RGBA")
+            bg = Image.new("RGBA", im.size, (0, 0, 0, 255))
+            im = Image.alpha_composite(bg, im)
+        im = im.convert("RGB")
+    if crop:
+        w, h = im.size
+        im = im.crop((round(crop[0] * w), round(crop[1] * h), round(crop[2] * w), round(crop[3] * h)))
+    return im
+
+
+def extract_palette(image, n=6, crop=None):
+    """Dominant colours of an image (path or PIL image): median cut + k-means on a downscaled copy.
+    Returns {"colors": [{hex, rgb, share, luma}] by share, "luma": stats, "gradient": MM gradient}.
+    The gradient lists the colours dark → light, each at the midpoint of its cumulative share, so a
+    colorize node fed a uniformly distributed grayscale reproduces the photo's colour shares."""
+    from PIL import Image
+    n = max(2, min(12, int(n)))
+    im = _open_rgb(image, crop) if not isinstance(image, Image.Image) else image.convert("RGB")
+    im = im.copy()
+    im.thumbnail((PALETTE_SAMPLE, PALETTE_SAMPLE))
+    q = im.quantize(colors=n, method=Image.Quantize.MEDIANCUT, kmeans=8)
+    pal = q.getpalette()
+    total = im.width * im.height
+    colors = []
+    for count, idx in q.getcolors(n) or []:
+        rgb = tuple(pal[3 * idx:3 * idx + 3])
+        colors.append({"hex": "#%02x%02x%02x" % rgb, "rgb": list(rgb), "share": round(count / total, 4),
+                       "luma": round(_luma(rgb), 3)})
+    colors.sort(key=lambda c: -c["share"])
+    hist = im.convert("L").histogram()
+    mean = sum(i * c for i, c in enumerate(hist)) / total
+    std = (sum(c * (i - mean) ** 2 for i, c in enumerate(hist)) / total) ** 0.5
+
+    def pct(p):
+        acc = 0
+        for i, c in enumerate(hist):
+            acc += c
+            if acc >= p * total:
+                return round(i / 255, 3)
+        return 1.0
+
+    points, acc = [], 0.0
+    for c in sorted(colors, key=lambda c: c["luma"]):
+        r, g, b = (v / 255 for v in c["rgb"])
+        points.append({"pos": round(acc + c["share"] / 2, 4), "r": round(r, 4), "g": round(g, 4), "b": round(b, 4), "a": 1})
+        acc += c["share"]
+    return {"colors": colors,
+            "luma": {"mean": round(mean / 255, 3), "std": round(std / 255, 3), "p05": pct(0.05), "p95": pct(0.95)},
+            "gradient": {"type": "Gradient", "interpolation": 1, "points": points}}
+
+
+def palette_strip(palette, width, height=40, label=None, label_w=150):
+    """Swatches dark → light, widths proportional to share, hex on each swatch that fits."""
+    from PIL import Image, ImageDraw
+    strip = Image.new("RGB", (width, height), (28, 28, 28))
+    dr = ImageDraw.Draw(strip)
+    x0 = 0
+    if label:
+        dr.text((6, 4), label, fill=(255, 255, 255), font=_font(13))
+        dr.text((6, 21), "luma %.2f ± %.2f" % (palette["luma"]["mean"], palette["luma"]["std"]),
+                fill=(190, 190, 190), font=_font(12))
+        x0 = label_w
+    cols = sorted(palette["colors"], key=lambda c: c["luma"])
+    total = sum(c["share"] for c in cols) or 1
+    x = x0
+    for i, c in enumerate(cols):
+        x1 = width if i == len(cols) - 1 else x + round((width - x0) * c["share"] / total)
+        dr.rectangle((x, 0, max(x, x1 - 1), height - 1), fill=tuple(c["rgb"]))
+        if x1 - x >= 56:
+            ink = (0, 0, 0) if c["luma"] > 0.5 else (255, 255, 255)
+            dr.text((x + 4, 4), c["hex"], fill=ink, font=_font(12))
+            dr.text((x + 4, 21), "%d%%" % round(100 * c["share"]), fill=ink, font=_font(12))
+        x = x1
+    return strip
+
+
+def _square(im):
+    s = min(im.size)
+    l, t = (im.width - s) // 2, (im.height - s) // 2
+    return im.crop((l, t, l + s, t + s))
+
+
+def compare_row(width, preview=None, reference=None, albedo=None, preview_label=None, n_colors=6, lab=22):
+    """The top block of a sheet: [reference photo | 3D preview] at `width`, each with a label, then
+    palette strips (reference, albedo) when a reference is given. Returns (image, info) or (None, {})."""
+    from PIL import Image, ImageDraw
+    if preview is None and reference is None:
+        return None, {}
+    parts = []  # (image, label)
+    info = {}
+    if reference is not None:
+        ref_full = _open_rgb(reference)
+        parts.append((_square(ref_full), "reference photo (the target; centre square)"))
+    if preview is not None:
+        with Image.open(preview) as im:
+            parts.append((im.convert("RGB"), preview_label or "3D preview (MM renderer)"))
+    h = max(p.height for p, _ in parts) if preview is None else parts[-1][0].height
+    scaled = [(p.resize((round(p.width * h / p.height), h)), t) for p, t in parts]
+    row_w = sum(p.width for p, _ in scaled)
+    row_h = round(h * width / row_w)
+    row = Image.new("RGB", (width, lab + row_h), (28, 28, 28))
+    dr = ImageDraw.Draw(row)
+    x = 0
+    for p, t in scaled:
+        w = round(p.width * width / row_w)
+        row.paste(p.resize((w, row_h)), (x, lab))
+        dr.text((x + 6, 4), t, fill=(255, 255, 255), font=_font(14))
+        x += w
+    blocks = [row]
+    if reference is not None:
+        ref_pal = extract_palette(ref_full, n_colors)
+        info["reference"] = str(reference)
+        info["reference_palette"] = [c["hex"] for c in ref_pal["colors"]]
+        info["reference_luma"] = ref_pal["luma"]
+        blocks.append(palette_strip(ref_pal, width, label="reference palette"))
+        if albedo is not None:
+            alb_pal = extract_palette(albedo, n_colors)
+            info["albedo_palette"] = [c["hex"] for c in alb_pal["colors"]]
+            info["albedo_luma"] = alb_pal["luma"]
+            blocks.append(palette_strip(alb_pal, width, label="albedo palette"))
+    out = Image.new("RGB", (width, sum(b.height for b in blocks)), (28, 28, 28))
+    y = 0
+    for b in blocks:
+        out.paste(b, (0, y))
+        y += b.height
+    return out, info
+
+
+def find_reference(directory):
+    """agent_runs/<run>/reference.* for an export dir (<iter>/out) or iteration dir (<iter>)."""
+    d = Path(directory).resolve()
+    for base in (d.parent, d.parent.parent, d):
+        hits = sorted(p for p in base.glob(REFERENCE_STEM + ".*") if p.suffix.lower() in IMAGE_SUFFIXES)
+        if hits:
+            return hits[0]
+    return None
+
+
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp")
+
+
+def cmd_palette(args):
+    res = extract_palette(args.photo, args.colors, _parse_crop(args.crop))
+    res = {"photo": str(Path(args.photo).resolve()), **res}
+    if not args.no_swatch:
+        out = Path(args.swatch) if args.swatch else RUNS_DIR / "palette" / (Path(args.photo).stem + ".png")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        palette_strip(res, 768, 48, label=Path(args.photo).name[:20]).save(out)
+        res["swatch"] = str(out)
+    print(_dumps_rows(res, ("colors", "points")))
+    return 0
+
+
+def _dumps_rows(obj, row_keys, indent=1):
+    """json.dumps(indent) but lists under `row_keys` print one compact item per line."""
+    def enc(o, level):
+        pad, inner = " " * (indent * level), " " * (indent * (level + 1))
+        if isinstance(o, dict) and o:
+            items = []
+            for k, v in o.items():
+                if k in row_keys and isinstance(v, list) and v:
+                    rows = (",\n" + inner + " ").join(json.dumps(x, ensure_ascii=False) for x in v)
+                    items.append("%s%s: [\n%s %s\n%s]" % (inner, json.dumps(k), inner, rows, inner))
+                else:
+                    items.append("%s%s: %s" % (inner, json.dumps(k), enc(v, level + 1)))
+            return "{\n" + ",\n".join(items) + "\n" + pad + "}"
+        return json.dumps(o, ensure_ascii=False)
+    return enc(obj, 0)
+
+
+def cmd_compare(args):
+    from PIL import Image
+    if not Path(args.ref).is_file():
+        raise SystemExit("mmx compare: no such reference image: %s" % args.ref)
+    block, info = compare_row(args.width, args.preview, args.ref, args.albedo)
+    sheet = Image.new("RGB", (block.width, block.height), (28, 28, 28))
+    sheet.paste(block, (0, 0))
+    out = Path(args.out) if args.out else Path(args.preview).with_name(Path(args.preview).stem + "_vs_ref.png")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(out)
+    print(json.dumps({"compare": str(out), **info}, indent=1))
+    return 0
+
+
+def make_sheet(directory, out=None, tile=384, cols=4, title=None, preview=None, preview_label=None,
+               reference=None):
     """Write a labeled contact sheet of every map in `directory`, with the 3D preview (`preview`, or
-    found by find_preview) as a full-width top row. Returns {"sheet", "tiles", "sources", "preview"}."""
+    found by find_preview) as a full-width top row; with a `reference` photo (or one found by
+    find_reference) the top row is [reference | preview] followed by reference/albedo palette strips.
+    Returns {"sheet", "tiles", "sources", "preview", "reference", ...palette info}."""
     from PIL import Image, ImageDraw
     directory = Path(directory)
     preview = Path(preview) if preview else find_preview(directory)
+    reference = Path(reference) if reference else find_reference(directory)
     maps = classify_maps(directory)
     if not maps:
         raise SystemExit("mmx sheet: no PNG maps in %s" % directory)
@@ -1748,18 +1970,13 @@ def make_sheet(directory, out=None, tile=384, cols=4, title=None, preview=None, 
 
     head, lab = 30, 22
     rows = (len(order) + cols - 1) // cols
-    top = None
-    if preview is not None:
-        with Image.open(preview) as im:
-            top = im.convert("RGB")
-        top = top.resize((cols * tile, round(top.height * cols * tile / top.width)))
-    top_h = top.height + lab if top is not None else 0
+    top, ref_info = compare_row(cols * tile, preview, reference, imgs.get("albedo"), preview_label, lab=lab)
+    top_h = top.height if top is not None else 0
     sheet = Image.new("RGB", (cols * tile, head + top_h + rows * (tile + lab)), (28, 28, 28))
     dr = ImageDraw.Draw(sheet)
     dr.text((6, 6), title or str(directory), fill=(255, 255, 255), font=_font(16))
     if top is not None:
-        sheet.paste(top, (0, head + lab))
-        dr.text((6, head + 4), preview_label or "3D preview (MM renderer)", fill=(255, 255, 255), font=_font(14))
+        sheet.paste(top, (0, head))
     info = []
     for i, k in enumerate(order):
         im = tiles[k]
@@ -1775,11 +1992,12 @@ def make_sheet(directory, out=None, tile=384, cols=4, title=None, preview=None, 
     out = Path(out) if out else directory / "sheet.png"
     sheet.save(out)
     return {"sheet": str(out), "tiles": info, "sources": {k: p.name for k, p in maps.items()},
-            "preview": str(preview) if preview is not None else None}
+            "preview": str(preview) if preview is not None else None,
+            "reference": str(reference) if reference is not None else None, **ref_info}
 
 
 def cmd_sheet(args):
-    res = make_sheet(args.dir, args.out, preview=args.preview)
+    res = make_sheet(args.dir, args.out, preview=args.preview, reference=args.ref)
     print(json.dumps(res, indent=1))
     return 0
 
@@ -1807,8 +2025,23 @@ def next_iter_dir(run_name, runs_dir=None):
 RUN_NAME_RE = re.compile(r"[\w.-]+(/[\w.-]+)*")
 
 
+def set_run_reference(run_dir, photo):
+    """Copy `photo` to <run_dir>/reference.<ext> (replacing an older one); later iterations find it."""
+    import shutil
+    photo = Path(photo)
+    if not photo.is_file():
+        raise SystemExit("mmx run: no such reference image: %s" % photo)
+    if photo.suffix.lower() not in IMAGE_SUFFIXES:
+        raise SystemExit("mmx run: --ref must be an image (%s)" % ", ".join(IMAGE_SUFFIXES))
+    for old in Path(run_dir).glob(REFERENCE_STEM + ".*"):
+        old.unlink()
+    dest = Path(run_dir) / (REFERENCE_STEM + photo.suffix.lower())
+    shutil.copy2(photo, dest)
+    return dest
+
+
 def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=None, note=None, size=None,
-                  preview=None):
+                  preview=None, reference=None):
     import shutil
     import time
     if not RUN_NAME_RE.fullmatch(run_name) or any(c in (".", "..") for c in run_name.split("/")):
@@ -1816,6 +2049,8 @@ def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=
                          "between parts (e.g. 1.3/desert)")
     ptex = Path(ptex).resolve()
     d = next_iter_dir(run_name, runs_dir)
+    if reference:
+        set_run_reference(d.parent, reference)
     _write_json(d / STATUS_NAME, {"state": "running", "started": time.time(), "ptex": str(ptex)})
     copy = d / ptex.name
     shutil.copy2(ptex, copy)
@@ -1835,8 +2070,13 @@ def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=
             res.setdefault("warnings", []).append("3D preview failed: %s" % "; ".join(p["errors"]))
     if res["ok"]:
         try:
-            res["sheet"] = make_sheet(d / "out", d / "sheet.png", title="%s / %s  (%s)" % (run_name, d.name, ptex.name),
-                                      preview=(d / PREVIEW_NAME) if label else None, preview_label=label)["sheet"]
+            sh = make_sheet(d / "out", d / "sheet.png", title="%s / %s  (%s)" % (run_name, d.name, ptex.name),
+                            preview=(d / PREVIEW_NAME) if label else None, preview_label=label,
+                            reference=find_reference(d))
+            res["sheet"] = sh["sheet"]
+            for k in ("reference", "reference_palette", "albedo_palette", "reference_luma", "albedo_luma"):
+                if sh.get(k) is not None:
+                    res[k] = sh[k]
         except Exception as e:  # keep the export result even if the sheet fails
             res["ok"] = False
             res["error"] = "sheet failed: %s" % e
@@ -1847,7 +2087,8 @@ def run_iteration(ptex, run_name, target=None, cfg=None, timeout=None, runs_dir=
 
 def cmd_run(args):
     res = run_iteration(args.ptex, args.run_name, args.target, load_config(args.config), args.timeout,
-                        note=args.note, size=args.size, preview=False if args.no_preview else None)
+                        note=args.note, size=args.size, preview=False if args.no_preview else None,
+                        reference=args.ref)
     print(json.dumps(res, indent=1, ensure_ascii=False))
     return 0 if res["ok"] else 2
 
@@ -1886,9 +2127,9 @@ def cmd_wait(args):
 
 
 def _ensure_pillow(cmd):
-    """sheet/run need Pillow: re-exec under agent_tools/.venv if the current python lacks it."""
+    """sheet/run/palette/compare need Pillow: re-exec under agent_tools/.venv if the current python lacks it."""
     import os
-    if cmd not in ("sheet", "run"):  # preview/node-preview need no Pillow
+    if cmd not in ("sheet", "run", "palette", "compare"):  # preview/node-preview need no Pillow
         return
     try:
         import PIL  # noqa: F401
@@ -1953,14 +2194,32 @@ def main(argv=None):
     p.add_argument("dir")
     p.add_argument("--out", help="output PNG (default <dir>/sheet.png)")
     p.add_argument("--preview", help="3D preview PNG for the top row (default <dir>/preview_3d.png or <dir>/../preview_3d.png)")
+    p.add_argument("--ref", help="reference photo shown left of the 3D preview, + palette strips "
+                   "(default: reference.* of the run, see run --ref)")
     p.set_defaults(fn=cmd_sheet)
     p = sub.add_parser("run", help="one iteration: agent_runs/<run>/iter_NNN/ with ptex copy, out/, sheet.png")
     p.add_argument("ptex")
     p.add_argument("--run-name", required=True, help="agent_runs/<name>/; '/' nests, e.g. 1.3/desert")
     p.add_argument("--note", help="text saved as note.md in the iteration dir (what changed and why)")
     p.add_argument("--no-preview", action="store_true", help="skip the 3D preview (iter_NNN/preview_3d.png)")
+    p.add_argument("--ref", help="reference photo (the target): copied to agent_runs/<run>/reference.<ext> and shown "
+                   "beside the 3D preview on this and every later sheet of the run")
     export_opts(p)
     p.set_defaults(fn=cmd_run)
+    p = sub.add_parser("palette", help="dominant colours of a photo (hex + share), a ready MM gradient, swatch PNG")
+    p.add_argument("photo")
+    p.add_argument("-n", "--colors", type=int, default=6, help="number of colours, 2..12 (default 6)")
+    p.add_argument("--crop", help="analyse only this part: L,T,R,B as fractions, e.g. 0.2,0.2,0.8,0.8")
+    p.add_argument("--swatch", help="swatch PNG (default agent_runs/palette/<photo stem>.png)")
+    p.add_argument("--no-swatch", action="store_true")
+    p.set_defaults(fn=cmd_palette)
+    p = sub.add_parser("compare", help="[reference photo | 3D preview] + palette strips in one PNG (e.g. for MCP previews)")
+    p.add_argument("preview", help="3D preview PNG (mmx preview / MCP render_preview output)")
+    p.add_argument("--ref", required=True, help="reference photo")
+    p.add_argument("--albedo", help="albedo PNG: adds its palette strip under the reference's")
+    p.add_argument("--width", type=int, default=1536)
+    p.add_argument("--out", help="output PNG (default <preview stem>_vs_ref.png next to the preview)")
+    p.set_defaults(fn=cmd_compare)
     p = sub.add_parser("wait", help="wait for an export/run started elsewhere (Terminal panel); print its result")
     p.add_argument("dir", nargs="?", help="export out dir or iteration dir")
     p.add_argument("--run-name", help="wait for this run's newest iteration")
