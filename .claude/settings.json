@@ -67,5 +67,8 @@
       "Edit(~/bin/**)",
       "Edit(~/opt/**)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "material-maker"
+  ]
 }
