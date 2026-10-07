@@ -48,13 +48,58 @@ for line in sys.stdin:
         sys.exit(0)
 '''
 
+# Keeps a graph path + edit list, so that crash recovery can be checked; started engines are counted in a file
+STATEFUL_SERVER = r'''
+import json, os, sys, time
+count = sys.argv[1]
+n = int(open(count).read()) + 1 if os.path.exists(count) else 1
+open(count, "w").write(str(n))
+print(json.dumps({"mm_rpc": 1, "id": None, "ok": True, "result": {"ready": True, "engine": n}}), flush=True)
+graph, edits = None, []
+for line in sys.stdin:
+    try:
+        req = json.loads(line)
+    except ValueError:
+        print(json.dumps({"mm_rpc": 1, "id": None, "ok": False, "error": {"code": "parse_error", "message": "bad"}}), flush=True)
+        continue
+    rid, m, p = req.get("id"), req["method"], req.get("params", {})
+    out = lambda d: print(json.dumps(dict({"mm_rpc": 1, "id": rid}, **d)), flush=True)
+    if m == "load":
+        if "missing" in p["path"]:
+            out({"ok": False, "error": {"code": "load_failed", "message": "no such file"}})
+            continue
+        graph, edits = p["path"], []
+        out({"ok": True, "result": {"path": graph}})
+    elif m == "save":
+        graph = p.get("path", graph)
+        out({"ok": True, "result": {"path": graph}})
+    elif m == "set_param":
+        if p.get("value") == "crash":
+            sys.exit(3)
+        if p.get("value") == "hang":
+            time.sleep(60)
+        if p.get("value") == "crash_on_replay" and n > 1:
+            sys.exit(3)
+        edits.append(p["value"])
+        out({"ok": True, "result": {}})
+    elif m == "state":
+        out({"ok": True, "result": {"graph": graph, "edits": edits, "engine": n}})
+    elif m == "exit_after":
+        out({"ok": True, "result": {}})
+        sys.exit(0)
+    elif m == "shutdown":
+        out({"ok": True, "result": {"bye": True}})
+        sys.exit(0)
+'''
+
 
 class TestClientWithFakeServer(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         fake = Path(self.tmp.name) / "fake_server.py"
         fake.write_text(FAKE_SERVER)
-        self.mm = MMClient(command=[sys.executable, str(fake)], log_path=Path(self.tmp.name) / "server.log", timeout=5)
+        self.mm = MMClient(command=[sys.executable, str(fake)], log_path=Path(self.tmp.name) / "server.log", timeout=5,
+                           auto_restart=False)
 
     def tearDown(self):
         self.mm.close(timeout=2)
@@ -93,6 +138,116 @@ class TestClientWithFakeServer(unittest.TestCase):
     def test_close_shutdown(self):
         self.assertEqual(self.mm.close(), 0)
 
+    def test_unsendable_requests(self):
+        for bad in ({"v": float("nan")}, {"v": object()}):
+            with self.assertRaises(MMError) as cm:
+                self.mm.call("echo", **bad)
+            self.assertEqual(cm.exception.code, "bad_params")
+        with self.assertRaises(MMError) as cm:
+            self.mm.call("echo", v="x" * (mm_client.MAX_REQUEST_BYTES + 1))
+        self.assertIn("too large", cm.exception.message)
+        self.assertEqual(self.mm.call("echo", v="é"), {"v": "é"})   # nothing was sent: still in sync
+
+    def test_light_methods_get_shorter_timeouts(self):
+        self.mm.timeout = 1000
+        waits = []
+        self.mm._wait = lambda req_id, timeout: waits.append(timeout) or {"ok": True, "id": req_id}
+        self.mm.call("set_param", node="a")
+        self.mm.call("render_preview")
+        self.assertEqual(waits, [mm_client.LIGHT_TIMEOUT, 1000])
+
+
+class TestRecovery(unittest.TestCase):
+    """auto_restart: a crash/timeout restarts the engine, reloads the last loaded/saved graph, replays the edits."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        d = Path(self.tmp.name)
+        fake = d / "stateful_server.py"
+        fake.write_text(STATEFUL_SERVER)
+        self.mm = MMClient(command=[sys.executable, str(fake), str(d / "count")], log_path=d / "server.log", timeout=5)
+
+    def tearDown(self):
+        self.mm.close(timeout=2)
+        self.tmp.cleanup()
+
+    def test_crash_restores_graph_and_edits(self):
+        self.mm.load("/g/a.ptex")
+        self.mm.set_param("n", "x", 1)
+        self.mm.set_param("n", "x", 2)
+        with self.assertRaises(MMError) as cm:
+            self.mm.set_param("n", "x", "crash")
+        e = cm.exception
+        self.assertEqual(e.code, "server_died")
+        self.assertEqual(e.recovery["graph"], "/g/a.ptex")
+        self.assertEqual(e.recovery["replayed"], 2)
+        self.assertIn("reloaded a.ptex and replayed 2 of 2 edits", e.message)
+        self.assertEqual(self.mm.call("state"), {"graph": "/g/a.ptex", "edits": [1, 2], "engine": 2})
+        self.assertIn("engine restart 1", (Path(self.tmp.name) / "server.log").read_text())
+
+    def test_save_resets_the_journal(self):
+        self.mm.load("/g/a.ptex")
+        self.mm.set_param("n", "x", 1)
+        self.mm.save("/g/b.ptex")
+        self.mm.set_param("n", "x", 2)
+        with self.assertRaises(MMError):
+            self.mm.set_param("n", "x", "crash")
+        self.assertEqual(self.mm.call("state")["graph"], "/g/b.ptex")
+        self.assertEqual(self.mm.call("state")["edits"], [2])
+
+    def test_timeout_restores(self):
+        self.mm.load("/g/a.ptex")
+        self.mm.set_param("n", "x", 1)
+        with self.assertRaises(MMError) as cm:
+            self.mm.call("set_param", node="n", value="hang", timeout=0.5)
+        self.assertEqual(cm.exception.code, "timeout")
+        self.assertEqual(self.mm.call("state")["edits"], [1])
+
+    def test_died_between_requests(self):
+        self.mm.load("/g/a.ptex")
+        self.mm.set_param("n", "x", 1)
+        self.mm.call("exit_after")
+        self.mm.proc.wait(5)
+        state = self.mm.call("state")   # recovered first, then answered
+        self.assertEqual((state["graph"], state["edits"], state["engine"]), ("/g/a.ptex", [1], 2))
+        self.assertEqual(self.mm.last_recovery["replayed"], 1)
+
+    def test_replay_crash_falls_back_to_graph_only(self):
+        self.mm.load("/g/a.ptex")
+        self.mm.set_param("n", "x", "crash_on_replay")   # fine in engine 1, crashes every later engine
+        with self.assertRaises(MMError) as cm:
+            self.mm.set_param("n", "x", "crash")
+        self.assertEqual(cm.exception.recovery["graph"], "/g/a.ptex")
+        self.assertEqual(cm.exception.recovery["replayed"], 0)
+        self.assertIn("crashed the engine again", cm.exception.message)
+        self.assertEqual(self.mm.call("state")["edits"], [])
+
+    def test_graph_gone_after_crash(self):
+        self.mm.load("/g/a.ptex")
+        self.mm.graph_path = "/g/missing.ptex"   # as if the file was deleted meanwhile
+        with self.assertRaises(MMError) as cm:
+            self.mm.set_param("n", "x", "crash")
+        self.assertIsNone(cm.exception.recovery["graph"])
+        self.assertIn("could not be restored", cm.exception.message)
+        self.assertIsNone(self.mm.call("state")["graph"])
+
+    def test_restart_without_reload_and_no_graph(self):
+        self.assertIn("no graph had been loaded", self.mm.restart()["summary"])
+        self.mm.load("/g/a.ptex")
+        self.mm.set_param("n", "x", 1)
+        r = self.mm.restart(reload=False)
+        self.assertEqual((r["graph"], r["edits_lost"]), (None, 1))
+        self.assertIsNone(self.mm.call("state")["graph"])
+
+    def test_malformed_line_answered(self):
+        """A parse_error without id while a request is pending is that request's answer (no timeout)."""
+        self.mm.proc.stdin.write("garbage\n")
+        self.mm.proc.stdin.flush()
+        t = time.time()
+        msg = self.mm._wait(12345, 5)
+        self.assertEqual(msg["error"]["code"], "parse_error")
+        self.assertLess(time.time() - t, 2)
+
     def test_wrappers_build_params(self):
         sent = []
         self.mm.call = lambda method, timeout=None, **p: sent.append((method, p)) or {}
@@ -124,6 +279,18 @@ class TestStartFailures(unittest.TestCase):
         cfg["mode"] = "release"
         with self.assertRaises(MMError):
             MMClient(cfg=cfg)
+
+    def test_missing_godot_or_project(self):
+        cfg = mmx.load_config()
+        cfg["mode"] = "source"
+        cfg["source"] = dict(cfg["source"], godot="/nonexistent/Godot")
+        with self.assertRaises(MMError) as cm:
+            MMClient(cfg=cfg)
+        self.assertIn("Godot not found", cm.exception.message)
+        cfg["source"] = dict(cfg["source"], godot=sys.executable, project="/nonexistent")
+        with self.assertRaises(MMError) as cm:
+            MMClient(cfg=cfg)
+        self.assertIn("no project.godot", cm.exception.message)
 
 
 def godot_available():
@@ -221,6 +388,40 @@ class TestRealServer(unittest.TestCase):
         self.assertError("bad_params", "set_param", node="Perlin")
         self.assertEqual(self.mm.validate()["ok"], True)
 
+    def test_missing_files_and_dropped_nodes_warn(self):
+        e = self.assertError("load_failed", "load", path=str(BRICKS.parent))
+        self.assertIn("a directory", e.message)
+        self.assertError("load_failed", "load", path=str(self.dir / "nope.ptex"))
+        r = self.mm.add_node("image", name="img", position=[10, 20], parameters={"image": str(self.dir / "nope.png")})
+        self.assertEqual(r["name"], "img")
+        self.assertTrue(any("nope.png not found" in w for w in self.mm.last_warnings), self.mm.last_warnings)
+        self.mm.set_param("img", "image", str(BRICKS))   # exists (not an image, but a file)
+        self.assertEqual(self.mm.last_warnings, [])
+        self.mm.set_param("img", "image", "/no/such/dir/tex.png")
+        self.assertTrue(self.mm.last_warnings)
+        v = self.mm.validate()
+        self.assertTrue(v["ok"])
+        self.assertEqual([w["code"] for w in v["warnings"]], ["missing_file"])
+        # A file with a node of an unknown type and a missing image: loads, with warnings
+        data = json.loads(BRICKS.read_text())
+        data["nodes"].append({"name": "alien", "type": "no_such_type", "parameters": {}})
+        data["nodes"].append({"name": "img", "type": "image", "parameters": {"image": "/no/such/tex.png"}})
+        data["connections"].append({"from": "alien", "from_port": 0, "to": "Material", "to_port": 1})
+        odd = self.dir / "odd.ptex"
+        odd.write_text(json.dumps(data))
+        self.mm.load(odd)
+        w = " | ".join(self.mm.last_warnings)
+        self.assertIn("alien has unknown type no_such_type", w)
+        self.assertIn("tex.png not found", w)
+
+    def test_size_limits(self):
+        self.assertError("bad_params", "render_preview", output=str(self.dir / "x.png"), size=8192)
+        self.assertError("bad_params", "render_output", node="Perlin", output=str(self.dir / "x.png"), size=16384)
+        self.assertError("bad_params", "export", output_dir=str(self.dir / "big"), size=16384)
+        self.assertError("bad_params", "render_output", node="Perlin", output=str(self.dir / "x.png"), size=8)
+        self.assertError("bad_params", "add_node", type="perlin", position=[1])
+        self.assertFalse((self.dir / "big").exists())
+
     def test_raw_protocol_errors(self):
         """Malformed lines answered with parse_error/bad_request, then normal service."""
         self.mm.proc.stdin.write("this is not json\n" + json.dumps({"id": 9001, "params": {}}) + "\n")
@@ -304,6 +505,29 @@ class TestRealServer(unittest.TestCase):
 
 @unittest.skipUnless(godot_available(), "needs Godot + mode = source (set MMX_SKIP_ENGINE=1 to skip)")
 class TestServerLifecycle(unittest.TestCase):
+    def test_killed_engine_recovers_graph_and_edits(self):
+        """SIGKILL the engine after edits: the next request restarts it, reloads the graph and replays the edits,
+        and renders the same pixels as before the crash."""
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            with MMClient(log_path=d / "server.log", timeout=120) as mm:
+                mm.load(BRICKS)
+                mm.set_param("Perlin", scale_x=11, scale_y=11)
+                mm.add_node("perlin", name="extra")
+                mm.connect("extra", 0, "Material", 1)
+                mm.render_preview(d / "before.png", size=128)
+                pid = mm.proc.pid
+                os.kill(pid, 9)
+                mm.proc.wait(10)
+                mm.render_preview(d / "after.png", size=128)
+                self.assertNotEqual(mm.proc.pid, pid)
+                self.assertEqual(mm.last_recovery["replayed"], 3)
+                self.assertEqual(md5(d / "before.png"), md5(d / "after.png"))
+                params = {n["name"]: n["parameters"] for n in mm.get_graph()["nodes"]}
+                self.assertEqual(params["Perlin"]["scale_x"], 11)
+                self.assertIn("extra", params)
+
+
     def test_no_graph_then_eof_quits(self):
         cfg = mmx.load_config()
         cmd = [cfg["source"]["godot"], "--path", cfg["source"]["project"], "--serve"]

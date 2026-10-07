@@ -21,6 +21,12 @@ const MODES : Array[String] = [ "--list-nodes", "--describe-node", "--validate",
 const RENDER_DEFAULT_SIZE : int = 512
 const RENDER_MIN_SIZE : int = 16
 const RENDER_MAX_SIZE : int = 8192
+# --render-preview: pixels per view (3 views of 4096 = a 12288 px wide image, ~9 s)
+const PREVIEW_MAX_SIZE : int = 4096
+# Exports: texture size (8192 = ~35 s for bricks; 16384 textures need GBs of video memory each)
+const EXPORT_MAX_SIZE : int = 8192
+# Parameter types whose value is a file path
+const FILE_PARAMETER_TYPES : Array[String] = [ "image_path", "file" ]
 const RENDER_EXTENSIONS : Array[String] = [ "png", "exr", "jpg", "webp" ]
 # Options that take a value, and the modes that accept them
 const RENDER_OPTIONS : Dictionary = {
@@ -164,6 +170,8 @@ static func parse_inspect_args(args : PackedStringArray) -> Dictionary:
 				rv.errors.append("no node (expected --node <name>)")
 			if rv.mode == "--render-preview" and rv.meshes.is_empty():
 				rv.meshes.append_array(PREVIEW_DEFAULT_MESH.split("+"))
+			if rv.mode == "--render-preview" and rv.size > PREVIEW_MAX_SIZE:
+				rv.errors.append("invalid --size %d (expected %d..%d pixels per view)" % [ rv.size, RENDER_MIN_SIZE, PREVIEW_MAX_SIZE ])
 			if rv.output == "":
 				rv.errors.append("no output file (expected -o <file.png>)")
 			elif not RENDER_EXTENSIONS.has(rv.output.get_extension().to_lower()):
@@ -523,12 +531,33 @@ func validate_file(path : String) -> Dictionary:
 func validate_gen(gen : MMGenBase, data : Dictionary, rv : Dictionary) -> void:
 	if gen is MMGenGraph:
 		check_graph(gen, data, "/", rv)
+	check_files(gen, "/", rv)
 	if rv.errors.is_empty():
 		await check_shaders(gen, rv)
 	else:
 		# Broken nodes or connections make downstream shaders fail too: fix those first
 		rv.warnings.append(issue("shader_check_skipped", "/", "", "shaders were not compiled because the graph has errors"))
 	rv.ok = rv.errors.is_empty()
+
+# Warns about file parameters (image node, text font...) that name no existing file: they render blank
+static func check_files(gen : MMGenBase, graph_path : String, rv : Dictionary) -> void:
+	for c in gen.get_children():
+		if not c is MMGenBase:
+			continue
+		rv.warnings.append_array(missing_files(c, graph_path))
+		if c is MMGenGraph:
+			check_files(c, graph_path.path_join(str(c.name)), rv)
+
+static func missing_files(gen : MMGenBase, graph_path : String) -> Array[Dictionary]:
+	var rv : Array[Dictionary] = []
+	for p in gen.get_parameter_defs():
+		if not p is Dictionary or not FILE_PARAMETER_TYPES.has(p.get("type", "")) or not gen.parameters.has(p.name):
+			continue
+		var path : Variant = gen.parameters[p.name]
+		if not path is String or path == "" or FileAccess.file_exists(path):
+			continue
+		rv.append(issue("missing_file", graph_path, str(gen.name), "%s.%s: file %s not found (renders blank)" % [ gen.name, p.name, path ]))
+	return rv
 
 static func port_types(defs : Array) -> Array:
 	var rv : Array = []

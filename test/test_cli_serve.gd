@@ -82,3 +82,9 @@ func test_objects() -> void:
 
 func test_other_types_pass_through() -> void:
 	assert_eq(coerce({ name="text", type="string" }, "abc").value, "abc")
+
+func test_is_number() -> void:
+	assert_true(CliServe.is_number(1))
+	assert_true(CliServe.is_number(2.5))
+	assert_false(CliServe.is_number("1"))
+	assert_false(CliServe.is_number(null))

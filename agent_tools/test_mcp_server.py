@@ -112,6 +112,18 @@ class TestProtocol(FakeEngineCase):
         self.server.serve(io.StringIO("{bad json\n\n"))
         self.assertEqual(json.loads(self.out.getvalue())["error"]["code"], -32700)
 
+    def test_malformed_messages(self):
+        handle = self.server.handle
+        self.assertEqual(handle({"jsonrpc": "2.0", "id": 1, "method": 5})["error"]["code"], -32600)
+        self.assertEqual(handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": [1]})["error"]["code"], -32602)
+        self.assertEqual(self.rpc("tools/call", {"name": "load", "arguments": "x"})["error"]["code"], -32602)
+        self.assertEqual(self.rpc("tools/call", {"name": ["load"]})["error"]["code"], -32602)
+        self.assertEqual(handle("just a string")["error"]["code"], -32600)
+        self.assertIsNone(handle({"jsonrpc": "2.0", "id": 3, "result": {}}))   # a response, not a request
+        self.server.serve(io.StringIO("[]\n"))
+        self.assertEqual(json.loads(self.out.getvalue())["error"]["code"], -32600)
+        self.assertEqual(self.rpc("ping")["result"], {})   # still serving
+
     def test_engine_starts_lazily(self):
         self.rpc("tools/list")
         self.assertIsNone(self.tools.mm)
@@ -135,6 +147,40 @@ class TestTools(FakeEngineCase):
         r, text = self.tool("load", path="no/such/file.ptex")
         self.assertIn("load_failed", text)
         self.assertIsNone(self.tools.mm)   # rejected before starting the engine
+
+    def test_arg_types_and_ranges(self):
+        for tool, args, expect in [
+                ("load", {"path": 5}, "load.path must be string"),
+                ("render_preview", {"size": 100000}, "render_preview.size must be <= 2048"),
+                ("render_preview", {"size": "big"}, "must be integer"),
+                ("render_output", {"node": "a", "size": 8}, "must be >= 16"),
+                ("render_output", {"node": "a", "port": True}, "must be integer"),
+                ("export", {"size": 16384}, "must be <= 8192"),
+                ("add_node", {"type": "perlin", "position": [1]}, "must have 2..2 items"),
+                ("add_node", {"type": "perlin", "position": ["a", 2]}, "add_node.position[0] must be number"),
+                ("get_graph", {"full": "yes"}, "must be boolean"),
+                ("batch", {"ops": []}, "must have 1..any items"),
+                ("batch", {"ops": [{"method": "load", "x": 1}]}, "batch.ops[0] does not take x"),
+                ("batch", {"ops": [{"method": "load", "params": []}]}, "batch.ops[0].params must be object"),
+                ("batch", {"ops": [{"params": {}}]}, "batch.ops[0] needs method")]:
+            r, text = self.tool(tool, **args)
+            self.assertTrue(r["isError"], (tool, args))
+            self.assertIn(expect, text, (tool, args))
+        self.assertIsNone(self.tools.mm)   # all rejected before starting the engine
+        r, p = self.tool("render_output", node="a", size=64.0, output=str(self.dir / "x.png"), return_image=False)
+        self.assertIn("no_graph", p)   # 64.0 is an integer: passed on
+
+    def test_large_images_not_inlined(self):
+        self.tool("load", path=str(BRICKS))
+        old = mcp_server.MAX_INLINE_IMAGE_BYTES
+        mcp_server.MAX_INLINE_IMAGE_BYTES = 10
+        try:
+            r, p = self.tool("render_preview")
+        finally:
+            mcp_server.MAX_INLINE_IMAGE_BYTES = old
+        self.assertFalse(r["isError"])
+        self.assertEqual([c["type"] for c in r["content"]], ["text"])
+        self.assertIn("render smaller", p["images_not_inlined"][0])
 
     def test_relative_path_and_render_returns_image(self):
         r, p = self.tool("load", path="material_maker/examples/bricks.ptex")
@@ -192,18 +238,42 @@ class TestTools(FakeEngineCase):
         r, p = self.tool("batch", ops=[{"method": "batch", "params": {}}])
         self.assertIn("unknown method", p["error"])
 
-    def test_crash_and_timeout_restart(self):
+    def test_crash_and_timeout_recover_graph(self):
         self.tool("load", path=str(BRICKS))
+        self.tool("set_param", node="Perlin", name="a", value=1)
         r, text = self.tool("set_param", node="Crash", name="a", value=1)
         self.assertTrue(r["isError"])
         self.assertIn("server_died", text)
-        r, text = self.tool("get_graph")   # fresh engine, nothing loaded
-        self.assertIn("no_graph", text)
-        self.tool("load", path=str(BRICKS))
+        self.assertIn("reloaded bricks.ptex and replayed 1 of 1 edits", text)
+        self.assertIn("was not repeated", text)
+        r, p = self.tool("get_graph")   # new engine with the graph restored
+        self.assertFalse(r["isError"], p)
+        self.assertEqual(self.tools.graph_path, BRICKS)
         r, text = self.tool("set_param", node="Hang", name="a", value=1)
         self.assertIn("timeout", text)
+        self.assertIn("reloaded bricks.ptex", text)
+        r, p = self.tool("render_preview")
+        self.assertFalse(r["isError"], p)
+        self.assertTrue(p["file"].endswith("bricks/preview_001.png"))
+
+    def test_engine_killed_between_calls(self):
+        self.tool("load", path=str(BRICKS))
+        self.tools.mm.proc.kill()
+        self.tools.mm.proc.wait()
+        r, p = self.tool("get_graph")
+        self.assertFalse(r["isError"], p)
+        self.assertIn("the engine had exited; engine restarted, reloaded bricks.ptex", p["warnings"][0])
+
+    def test_restart_tool(self):
         r, p = self.tool("restart")
         self.assertTrue(p["restarted"])
+        self.tool("load", path=str(BRICKS))
+        r, p = self.tool("restart")
+        self.assertEqual(p["graph"], str(BRICKS))
+        r, p = self.tool("restart", reload=False)
+        self.assertIsNone(p["graph"])
+        r, text = self.tool("get_graph")
+        self.assertIn("no_graph", text)
 
 
 class TestStdio(unittest.TestCase):

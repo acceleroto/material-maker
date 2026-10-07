@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 5.2 (complete); next 5.3
+**Current session:** 5.3 (in progress)
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -210,7 +210,8 @@
   (this session was started outside the repo, so `.mcp.json` wasn't loaded here).
 
 ## In progress
-- None.
+- 5.3: engine hardening + MMClient crash recovery + MCP arg checks committed; next: MCP real-engine recovery test,
+  docs (README), agent_docs/ARCHITECTURE.md, full test run.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).

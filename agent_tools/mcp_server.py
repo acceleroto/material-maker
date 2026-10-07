@@ -9,8 +9,11 @@ image so the agent sees it directly.
     python3 agent_tools/mcp_server.py --check    # start the engine once, print its info, exit 0/1
     python3 agent_tools/mcp_server.py --list-tools
 
-The engine starts on the first tool call that needs it (~1.3 s) and stays up; a timeout or crash kills it and
-the next call starts a fresh one (the loaded graph and unsaved edits are lost). Relative paths resolve against
+The engine starts on the first tool call that needs it (~1.3 s) and stays up. A timeout or crash restarts it at
+once and restores the graph (MMClient: reload the last loaded/saved .ptex, replay the edits since); the failed call
+itself is reported as an error and not repeated. Arguments are checked against the tool schemas (names, types,
+ranges) before the engine sees them. Images larger than MAX_INLINE_IMAGE_BYTES are written but not inlined.
+Relative paths resolve against
 the repo root; omitted output paths go to agent_runs/mcp/<graph stem>/. Engine stderr: agent_runs/mcp/engine.log.
 MCP transport: JSON-RPC 2.0, one message per line; nothing but MCP messages is written to stdout.
 """
@@ -33,6 +36,7 @@ SERVER_NAME = "material-maker"
 SERVER_VERSION = "0.1.0"
 PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]   # newest first
 OUT_ROOT = mmx.RUNS_DIR / "mcp"
+MAX_INLINE_IMAGE_BYTES = 8 << 20   # bigger PNGs (e.g. an 8192 px node render) are returned as a path only
 
 INSTRUCTIONS = """Material Maker engine: edit a procedural material graph (.ptex) in memory, see it rendered, export maps.
 Loop: load (closest example in material_maker/examples/) -> render_preview (lit 3D sphere+plane: the primary image
@@ -46,6 +50,7 @@ ANY = {"type": ["number", "integer", "string", "boolean", "object", "array", "nu
 NODE = {"type": "string", "description": "Node name as in get_graph, e.g. \"Perlin\"; \"graph/Bricks\" for a node inside sub-graph \"graph\"."}
 PORT = {"type": "integer", "minimum": 0, "default": 0}
 SIZE = {"type": "integer", "minimum": 16, "maximum": 8192, "description": "Image size in pixels (default 512)."}
+EXPORT_MAX_SIZE = 8192   # cli_inspect.gd EXPORT_MAX_SIZE
 
 
 def _obj(props, required=(), **extra):
@@ -148,7 +153,8 @@ TOOLS = {
         "files in output_dir are deleted first. Returns the written files.",
         _obj({"output_dir": {"type": "string", "description": "Directory (default agent_runs/mcp/<graph>/export)."},
               "target": {"type": "string", "description": "Export target, exact name (default from mmx.toml: Unity/URP)."},
-              "size": {"type": "integer", "minimum": 0, "description": "Texture size in pixels; 0 = the graph's own size (default)."},
+              "size": {"type": "integer", "minimum": 0, "maximum": EXPORT_MAX_SIZE,
+                       "description": "Texture size in pixels; 0 = the graph's own size (default)."},
               "prefix": {"type": "string", "description": "File name stem (default: the graph's file name)."},
               "overwrite": {"type": "boolean", "default": True}}),
         {"readOnlyHint": False, "destructiveHint": False}),
@@ -161,8 +167,10 @@ TOOLS = {
             {"method": {"type": "string"}, "params": {"type": "object"}}, ["method"])}}, ["ops"]),
         {"readOnlyHint": False, "destructiveHint": True}),
     "restart": (
-        "Kill and restart the engine (after a hang or an internal error). The loaded graph and unsaved edits are lost.",
-        _obj({}),
+        "Kill and restart the engine (after an internal error or odd behaviour). By default the last loaded/saved "
+        "graph is reloaded and the edits made since are replayed; reload=false starts with no graph. (Crashes and "
+        "timeouts restart the engine automatically.)",
+        _obj({"reload": {"type": "boolean", "default": True}}),
         {"readOnlyHint": False, "destructiveHint": True}),
 }
 
@@ -187,8 +195,6 @@ class MaterialMakerTools:
     # -- engine lifecycle --------------------------------------------------
 
     def engine(self):
-        if self.mm is not None and self.mm.proc.poll() is not None:
-            self._drop()
         if self.mm is None:
             self.mm = MMClient(self.cfg, log_path=self.log_path, timeout=self.timeout, command=self.engine_command)
         return self.mm
@@ -216,15 +222,26 @@ class MaterialMakerTools:
         try:
             result = mm.call(method, **params)
         except MMError as e:
-            if e.code in ("timeout", "server_died"):
+            if e.code == "start_failed":   # the engine died and no new one starts
                 self._drop()
-                raise ToolError("%s: %s. The engine is gone; the next call starts a new one (load the graph again, "
-                                "unsaved edits are lost). Engine log: %s" % (e.code, e.message, _rel(self.log_path)))
+                raise ToolError("%s: %s. Engine log: %s" % (e.code, e.message, _rel(self.log_path)))
+            if e.recovery is not None:
+                self._sync_graph()
+                raise ToolError("%s: %s. The %s call was not repeated (it may crash again: try smaller sizes or "
+                                "another edit). Engine log: %s" % (e.code, e.message, method, _rel(self.log_path)))
             hint = HINTS.get(e.code, "")
             if hint and hint in e.message:
                 hint = ""
             raise ToolError("%s: %s%s" % (e.code, e.message, (" (" + hint + ")") if hint else ""))
-        return result, list(mm.last_warnings)
+        warnings = list(mm.last_warnings)
+        if mm.last_recovery is not None:   # the engine had exited since the previous call
+            self._sync_graph()
+            warnings.insert(0, "the engine had exited; " + mm.last_recovery["summary"])
+        return result, warnings
+
+    def _sync_graph(self):
+        """After a recovery the engine holds the last loaded/saved graph (or none)."""
+        self.graph_path = Path(self.mm.graph_path) if self.mm and self.mm.graph_path else None
 
     # -- paths -------------------------------------------------------------
 
@@ -247,7 +264,7 @@ class MaterialMakerTools:
 
     def run(self, name, args):
         """Returns (result dict, warnings, image paths to return)."""
-        args = dict(args or {})
+        args = {} if args is None else args
         if name == "batch":
             raise ToolError("bad_params: batch cannot be nested")
         fn = getattr(self, "t_" + name, None)
@@ -337,10 +354,20 @@ class MaterialMakerTools:
                               **_opt(size=size, prefix=prefix))
         return result, w, []
 
-    def t_restart(self):
-        self._drop()
-        mm = self.engine()
-        return {"restarted": True, "start_seconds": mm.start_seconds, "engine": mm.info}, [], []
+    def t_restart(self, reload=True):
+        if self.mm is None:
+            mm = self.engine()
+            report = {"restarted": True, "graph": None, "replayed": 0, "edits_lost": 0, "errors": [],
+                      "summary": "engine started (no graph had been loaded)"}
+        else:
+            mm = self.mm
+            try:
+                report = mm.restart(reload=reload)
+            except MMError as e:
+                self._drop()
+                raise ToolError("%s: %s. Engine log: %s" % (e.code, e.message, _rel(self.log_path)))
+        self._sync_graph()
+        return dict(report, start_seconds=mm.start_seconds, engine=mm.info), [], []
 
     def batch(self, ops):
         """Returns (steps, warnings, images, error or None)."""
@@ -373,7 +400,9 @@ HINTS = {
 
 
 def _check_args(name, args):
-    """Reject unknown keys and missing required ones before they reach the engine."""
+    """Reject unknown keys, missing required ones and values of the wrong type/range before they reach the engine."""
+    if not isinstance(args, dict):
+        raise ToolError("bad_params: %s: arguments must be an object" % name)
     schema = TOOLS[name][1]
     unknown = sorted(set(args) - set(schema["properties"]))
     if unknown:
@@ -382,6 +411,63 @@ def _check_args(name, args):
     missing = [k for k in schema.get("required", []) if k not in args]
     if missing:
         raise ToolError("bad_params: %s needs %s" % (name, ", ".join(missing)))
+    for k, v in args.items():
+        problem = _schema_problem(schema["properties"][k], v)
+        if problem:
+            raise ToolError("bad_params: %s.%s%s (got %s)" % (name, k, problem, _short(v)))
+
+
+JSON_TYPES = {"string": str, "boolean": bool, "object": dict, "array": list, "null": type(None)}
+
+
+def _type_ok(t, v):
+    if t == "integer":
+        return isinstance(v, int) and not isinstance(v, bool) or isinstance(v, float) and v.is_integer()
+    if t == "number":
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf")
+    return isinstance(v, JSON_TYPES[t])
+
+
+def _schema_problem(schema, v):
+    """The subset of JSON Schema our tool schemas use: type, minimum/maximum, items/minItems/maxItems,
+    properties/required/additionalProperties. Returns a description of the first problem, or None."""
+    types = schema.get("type")
+    if types is not None:
+        types = types if isinstance(types, list) else [types]
+        if not any(_type_ok(t, v) for t in types):
+            return " must be %s" % " or ".join(types)
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        if "minimum" in schema and v < schema["minimum"]:
+            return " must be >= %s" % schema["minimum"]
+        if "maximum" in schema and v > schema["maximum"]:
+            return " must be <= %s" % schema["maximum"]
+    if isinstance(v, list):
+        if len(v) < schema.get("minItems", 0) or len(v) > schema.get("maxItems", len(v)):
+            return " must have %s..%s items" % (schema.get("minItems", 0), schema.get("maxItems", "any"))
+        if "items" in schema:
+            for i, x in enumerate(v):
+                problem = _schema_problem(schema["items"], x)
+                if problem:
+                    return "[%d]%s" % (i, problem)
+    if isinstance(v, dict) and ("properties" in schema or "required" in schema):
+        props = schema.get("properties", {})
+        for k in schema.get("required", []):
+            if k not in v:
+                return " needs %s" % k
+        for k, x in v.items():
+            sub = props.get(k, schema.get("additionalProperties", True))
+            if sub is False:
+                return " does not take %s" % k
+            if isinstance(sub, dict):
+                problem = _schema_problem(sub, x)
+                if problem:
+                    return ".%s%s" % (k, problem)
+    return None
+
+
+def _short(v):
+    text = json.dumps(v, ensure_ascii=False, default=str)
+    return text if len(text) <= 80 else text[:77] + "..."
 
 
 def _abs(path):
@@ -431,6 +517,9 @@ class MCPServer:
             except ValueError:
                 self.send({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}})
                 continue
+            if msg == []:
+                self.send({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request: empty batch"}})
+                continue
             for m in (msg if isinstance(msg, list) else [msg]):
                 reply = self.handle(m)
                 if reply is not None:
@@ -442,9 +531,15 @@ class MCPServer:
                 return None   # a response to a server->client request (we send none)
             return {"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None,
                     "error": {"code": -32600, "message": "invalid request"}}
-        method, params, mid = msg["method"], msg.get("params") or {}, msg.get("id")
+        method, params, mid = msg["method"], msg.get("params"), msg.get("id")
         is_notification = "id" not in msg
+        if params is None:
+            params = {}
         try:
+            if not isinstance(method, str):
+                raise _RPCError(-32600, "invalid request: method must be a string")
+            if not isinstance(params, dict):
+                raise _RPCError(-32602, "invalid params: must be an object")
             result = self.dispatch(method, params)
         except _RPCError as e:
             return None if is_notification else {"jsonrpc": "2.0", "id": mid, "error": {"code": e.code, "message": e.message}}
@@ -467,11 +562,14 @@ class MCPServer:
         if method == "tools/list":
             return {"tools": tool_list()}
         if method == "tools/call":
-            return self.call_tool(params.get("name"), params.get("arguments") or {})
+            args = params.get("arguments")
+            if args is not None and not isinstance(args, dict):
+                raise _RPCError(-32602, "invalid params: arguments must be an object")
+            return self.call_tool(params.get("name"), args or {})
         raise _RPCError(-32601, "method not found: %s" % method)
 
     def call_tool(self, name, args):
-        if name not in TOOLS:
+        if not isinstance(name, str) or name not in TOOLS:
             raise _RPCError(-32602, "unknown tool: %s" % name)
         t = time.time()
         try:
@@ -494,13 +592,19 @@ class MCPServer:
             return {"content": [{"type": "text", "text": str(e)}], "isError": True}
         except MMError as e:   # engine failed to start
             return {"content": [{"type": "text", "text": "%s: %s" % (e.code, e.message)}], "isError": True}
+        inline = []
         for p in images:
             payload.setdefault("images", []).append(_rel(p))
+            size = Path(p).stat().st_size if Path(p).is_file() else 0
+            if size > MAX_INLINE_IMAGE_BYTES:
+                payload.setdefault("images_not_inlined", []).append(
+                    "%s (%.1f MB > %d MB: render smaller to see it here)" % (_rel(p), size / 1e6, MAX_INLINE_IMAGE_BYTES >> 20))
+            elif size:
+                inline.append(p)
         payload["tool_seconds"] = round(time.time() - t, 2)
         content = [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]
-        for p in images:
-            if Path(p).is_file():
-                content.append(_image_content(p))
+        for p in inline:
+            content.append(_image_content(p))
         return {"content": content, "isError": is_error}
 
 

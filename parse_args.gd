@@ -60,8 +60,8 @@ static func parse_export_args(args : PackedStringArray) -> Dictionary:
 					"--output-file":
 						rv.output_file = value
 					"--size":
-						if not value.is_valid_int() or value.to_int() < 0:
-							rv.errors.append("incorrect size "+value+" (expected an integer >= 0, 0 = the graph's size)")
+						if not value.is_valid_int() or value.to_int() < 0 or value.to_int() > 8192:
+							rv.errors.append("incorrect size "+value+" (expected an integer 0..8192, 0 = the graph's size)")
 						else:
 							rv.size = value.to_int()
 			"--json":

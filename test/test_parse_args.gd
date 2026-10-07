@@ -47,7 +47,7 @@ func test_size_zero_means_graph_size() -> void:
 	assert_eq(o.size, 0)
 
 func test_bad_sizes() -> void:
-	for s in ["-1", "abc", "12.5", ""]:
+	for s in ["-1", "abc", "12.5", "", "16384"]:
 		var o: Dictionary = parse(["--export-material", "--size", s, "/a.ptex"])
 		assert_eq(o.errors.size(), 1, "size '%s' should be rejected" % s)
 

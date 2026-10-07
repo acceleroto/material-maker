@@ -218,6 +218,9 @@ func require_absolute_path(params : Dictionary, key : String, required : bool = 
 		return ""
 	return v
 
+static func is_number(v : Variant) -> bool:
+	return v is int or v is float
+
 func optional_int(params : Dictionary, key : String, default : int, min_value : int, max_value : int) -> int:
 	var v : Variant = params.get(key, null)
 	if v == null:
@@ -384,6 +387,9 @@ func m_load(params : Dictionary) -> Dictionary:
 	var path : String = require_absolute_path(params, "path")
 	if path == "":
 		return {}
+	if DirAccess.dir_exists_absolute(path):
+		show_error("Cannot load %s (a directory, not a .ptex file)" % path, 2)
+		return {}
 	var gen : MMGenBase = await mm_loader.load_gen(path)
 	if gen == null:
 		show_error("Cannot load %s (%s)" % [ path, "not a valid material file" if FileAccess.file_exists(path) else "no such file" ], 2)
@@ -395,12 +401,24 @@ func m_load(params : Dictionary) -> Dictionary:
 	graph = gen
 	graph_path = path
 	add_child(graph)
+	load_warnings(path)
 	var material : Node = graph.get_node_or_null("Material")
 	var nodes : int = 0
 	for c in graph.get_children():
 		if c is MMGenBase:
 			nodes += 1
 	return { path=path, nodes=nodes, material=(material is MMGenMaterial), image_size=material.get_image_size() if material is MMGenMaterial else 0 }
+
+# The loader silently drops nodes of unknown types and connections it cannot make: compare the
+# loaded graph with the file and report those, and file parameters naming missing files
+func load_warnings(path : String) -> void:
+	var rv : Dictionary = { nodes=0, errors=[] as Array[Dictionary], warnings=[] as Array[Dictionary] }
+	var data : Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if graph is MMGenGraph and data is Dictionary:
+		inspect.check_graph(graph, data, "/", rv)
+	inspect.check_files(graph, "/", rv)
+	for i : Dictionary in rv.errors + rv.warnings:
+		show_warning("%s%s (%s)" % [ "" if i.graph_path == "/" else i.graph_path+": ", i.message, i.code ])
 
 func m_save(params : Dictionary) -> Dictionary:
 	var path : String = require_absolute_path(params, "path", false)
@@ -506,10 +524,12 @@ func m_add_node(params : Dictionary) -> Dictionary:
 			return {}
 		data.name = node_name
 	var position : Variant = params.get("position", null)
-	if position is Dictionary and position.has("x") and position.has("y"):
+	if position is Dictionary and is_number(position.get("x")) and is_number(position.get("y")):
 		data.node_position = { x=float(position.x), y=float(position.y) }
+	elif position is Array and position.size() == 2 and is_number(position[0]) and is_number(position[1]):
+		data.node_position = { x=float(position[0]), y=float(position[1]) }
 	elif position != null:
-		fail("bad_params", "\"position\" must be {\"x\": ..., \"y\": ...}")
+		fail("bad_params", "\"position\" must be [x, y] or {\"x\": ..., \"y\": ...}")
 		return {}
 	else:
 		# Right of the rightmost node, so that the graph stays readable in the editor
@@ -534,6 +554,8 @@ func m_add_node(params : Dictionary) -> Dictionary:
 	if not errors.is_empty():
 		parent.remove_generator(gen)
 		return {}
+	for i : Dictionary in inspect.missing_files(gen, ""):
+		show_warning(i.message)
 	var path : String = (param_string(params, "parent")+"/"+gen.name).trim_prefix("/")
 	return { node=path, name=gen.name, type=gen_type(gen), inputs=port_summary(gen.get_input_defs()),
 			outputs=port_summary(gen.get_output_defs()), parameters=parameter_values(gen), changed=changed }
@@ -647,6 +669,8 @@ func m_set_param(params : Dictionary) -> Dictionary:
 	var changed : Array = set_parameters(gen, values)
 	if not errors.is_empty():
 		return {}
+	for i : Dictionary in inspect.missing_files(gen, ""):
+		show_warning(i.message)
 	return { node=node_path, changed=changed }
 
 func m_get_graph(params : Dictionary) -> Dictionary:
@@ -709,7 +733,7 @@ func m_render_output(params : Dictionary) -> Dictionary:
 
 func m_render_preview(params : Dictionary) -> Dictionary:
 	var output : String = render_output_path(params)
-	var size : int = optional_int(params, "size", inspect.RENDER_DEFAULT_SIZE, inspect.RENDER_MIN_SIZE, inspect.RENDER_MAX_SIZE)
+	var size : int = optional_int(params, "size", inspect.RENDER_DEFAULT_SIZE, inspect.RENDER_MIN_SIZE, inspect.PREVIEW_MAX_SIZE)
 	var env : String = param_string(params, "env", inspect.PREVIEW_DEFAULT_ENV)
 	var mesh_param : Variant = params.get("mesh", inspect.PREVIEW_DEFAULT_MESH)
 	var mesh_names : Array = mesh_param.to_lower().split("+") if mesh_param is String else (mesh_param if mesh_param is Array else [])
@@ -738,7 +762,7 @@ func m_export(params : Dictionary) -> Dictionary:
 	var parse_args : GDScript = preload("res://parse_args.gd")
 	var output_dir : String = require_absolute_path(params, "output_dir")
 	var target : String = param_string(params, "target", DEFAULT_TARGET)
-	var size : int = optional_int(params, "size", 0, 0, 16384)
+	var size : int = optional_int(params, "size", 0, 0, inspect.EXPORT_MAX_SIZE)
 	var prefix : String = param_string(params, "prefix", graph_path.get_file().get_basename() if graph_path != "" else "material")
 	if prefix == "" or prefix.contains("/") or not prefix.is_valid_filename():
 		fail("bad_params", "invalid prefix "+prefix)

@@ -98,6 +98,10 @@ func test_render_preview_errors() -> void:
 	assert_eq(parse(["--render-preview", "/a.ptex", "--mesh", "torus", "-o", "/b.png"]).errors.size(), 1)
 	assert_eq(parse(["--render-preview", "/a.ptex"]).errors, ["no output file (expected -o <file.png>)"])
 	assert_eq(parse(["--render-preview", "-o", "/b.png"]).errors, ["--render-preview takes exactly one input file"])
+	# Per view: several views side by side make a much wider image
+	assert_eq(parse(["--render-preview", "/a.ptex", "--size", "4096", "-o", "/b.png"]).errors, [])
+	assert_eq(parse(["--render-preview", "/a.ptex", "--size", "8192", "-o", "/b.png"]).errors.size(), 1)
+	assert_eq(parse(["--render-output", "/a.ptex", "--node", "n", "--size", "8192", "-o", "/b.png"]).errors, [])
 
 # JSON conversion
 

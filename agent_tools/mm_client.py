@@ -17,6 +17,11 @@ Protocol (one JSON object per line; see agent_tools/README.md "Server mode"):
            {"mm_rpc": 1, "id": 1, "ok": false, "error": {"code": "...", "message": "..."}}
 The engine also prints its own messages on stdout: lines without "mm_rpc" are ignored.
 
+Crash recovery (auto_restart=True, the default): when the engine dies or a request times out, the client
+starts a new engine, loads the last loaded/saved graph and replays the edits made since (add_node, remove_node,
+connect, disconnect, set_param); the failed request itself is not repeated and still raises MMError (its
+.recovery says what was restored). An engine that died between requests is recovered before the next one.
+
 Subcommands:
   batch <file.jsonl>   send each request line through one server, print the responses
   bench <ptex> ...     seconds per iteration, server vs relaunching the engine
@@ -24,6 +29,7 @@ Subcommands:
 
 import argparse
 import collections
+import copy
 import json
 import os
 import queue
@@ -40,58 +46,94 @@ import mmx  # noqa: E402
 PROTOCOL_VERSION = 1
 START_TIMEOUT = 60.0      # seconds until the ready line
 DEFAULT_TIMEOUT = 180.0   # seconds per request (exports of big graphs take a while)
+LIGHT_TIMEOUT = 60.0      # cap for methods that neither render nor compile (a hang shows up sooner)
 CLOSE_TIMEOUT = 10.0
+LIGHT_METHODS = {"save", "list_nodes", "describe_node", "add_node", "remove_node", "connect", "disconnect",
+                 "set_param", "get_graph", "shutdown"}
+# Edits replayed after a crash (on top of the last loaded/saved graph)
+EDIT_METHODS = {"add_node", "remove_node", "connect", "disconnect", "set_param"}
+FATAL_CODES = {"timeout", "server_died"}
+# cli_serve.gd reads stdin lines into a 4 MiB buffer: longer requests would arrive in pieces
+MAX_REQUEST_BYTES = (1 << 22) - 1
 
 
 class MMError(Exception):
-    """A request failed (code from the server, or "timeout" / "server_died" / "start_failed")."""
+    """A request failed (code from the server, or "timeout" / "server_died" / "start_failed" / "bad_params").
+    After a timeout/crash with auto_restart, .recovery is the recovery report (see MMClient.restart)."""
 
-    def __init__(self, code, message, response=None):
+    def __init__(self, code, message, response=None, recovery=None):
         super().__init__("%s: %s" % (code, message))
         self.code = code
         self.message = message
         self.response = response
+        self.recovery = recovery
 
 
 class MMClient:
     """One engine server process. Methods mirror the server's (load, set_param, render_preview...);
     each returns the result dict or raises MMError. Warnings of the last request: .last_warnings."""
 
-    def __init__(self, cfg=None, log_path=None, timeout=DEFAULT_TIMEOUT, command=None, start_timeout=START_TIMEOUT):
+    def __init__(self, cfg=None, log_path=None, timeout=DEFAULT_TIMEOUT, command=None, start_timeout=START_TIMEOUT,
+                 auto_restart=True):
         self.cfg = cfg or mmx.load_config()
         self.timeout = timeout
+        self.start_timeout = start_timeout
+        self.auto_restart = auto_restart
         self.last_warnings = []
+        self.last_recovery = None    # report of the last crash recovery (also on MMError.recovery)
+        self.restarts = 0
+        self.graph_path = None       # last successfully loaded/saved graph (what a restart reloads)
+        self.edits = []              # [(method, params)] since then (what a restart replays)
         self.noise = collections.deque(maxlen=50)   # recent non-protocol stdout lines
-        self._responses = queue.Queue()
         self._next_id = 1
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         if command is None:
             if self.cfg["mode"] != "source":
                 raise MMError("start_failed", "the server needs mode = \"source\" in mmx.toml")
-            command = [self.cfg["source"]["godot"], "--path", self.cfg["source"]["project"], "--serve"]
+            godot, project = Path(self.cfg["source"]["godot"]), Path(self.cfg["source"]["project"])
+            if not godot.is_file():
+                raise MMError("start_failed", "Godot not found at %s (mmx.toml [source] godot)" % godot)
+            if not (project / "project.godot").is_file():
+                raise MMError("start_failed", "no project.godot in %s (mmx.toml [source] project)" % project)
+            command = [str(godot), "--path", str(project), "--serve"]
         self.command = list(command)
         self.log_path = Path(log_path) if log_path else None
+        self._log = subprocess.DEVNULL
+        self.proc = None
+        self._start()
+
+    # -- process plumbing --------------------------------------------------
+
+    def _start(self):
+        """Start an engine process and wait for its ready line (log appended after a restart)."""
         if self.log_path:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            self._log = open(self.log_path, "w")
-        else:
-            self._log = subprocess.DEVNULL
+            if self._log is subprocess.DEVNULL:
+                self._log = open(self.log_path, "a" if self.restarts else "w")
+            if self.restarts:
+                self._log.write("\n--- mm_client: engine restart %d ---\n" % self.restarts)
+                self._log.flush()
+        self._responses = queue.Queue()
         start = time.time()
         try:
             self.proc = subprocess.Popen(self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
                                          text=True, encoding="utf-8", errors="replace", bufsize=1, start_new_session=True)
         except OSError as e:
             raise MMError("start_failed", "cannot start the engine: %s" % e)
-        self._reader = threading.Thread(target=self._read, daemon=True)
-        self._reader.start()
-        ready = self._wait(None, start_timeout)
+        threading.Thread(target=self._read, args=(self.proc, self._responses), daemon=True).start()
+        try:
+            ready = self._wait(None, self.start_timeout)
+        except MMError:
+            self.kill()
+            raise
+        if not ready.get("ok"):
+            self.kill()
+            raise MMError("start_failed", "the engine did not start: %s" % ready.get("error"))
         self.info = ready.get("result", {})
         self.start_seconds = round(time.time() - start, 2)
 
-    # -- process plumbing --------------------------------------------------
-
-    def _read(self):
-        for line in self.proc.stdout:
+    def _read(self, proc, responses):
+        for line in proc.stdout:
             line = line.strip()
             msg = None
             if line.startswith("{") and '"mm_rpc"' in line:
@@ -100,10 +142,11 @@ class MMClient:
                 except ValueError:
                     msg = None
             if isinstance(msg, dict) and "mm_rpc" in msg:
-                self._responses.put(msg)
+                responses.put(msg)
             elif line:
                 self.noise.append(line)
-        self._responses.put(None)  # EOF: the process is gone
+        proc.stdout.close()
+        responses.put(None)  # EOF: the process is gone
 
     def _died(self, what):
         rc = self.proc.poll()
@@ -125,41 +168,138 @@ class MMClient:
                 raise self._died("before responding")
             if msg.get("id") == req_id:
                 return msg
+            if req_id is not None and msg.get("id") is None and not msg.get("ok"):
+                # The server could not read our request (parse_error / bad_request): requests are sequential,
+                # so this is the answer to ours
+                return msg
             # A response to an earlier request that timed out on our side: drop it
 
     def call(self, method, timeout=None, **params):
-        """Send one request and wait for its response. Returns the result dict, raises MMError."""
+        """Send one request and wait for its response. Returns the result dict, raises MMError.
+        With auto_restart, a timeout/crash restarts the engine and restores the graph before raising."""
         with self._lock:
+            self.last_recovery = None
             if self.proc.poll() is not None:
-                raise self._died("earlier")
-            req_id = self._next_id
-            self._next_id += 1
-            line = json.dumps({"id": req_id, "method": method, "params": params}, ensure_ascii=False)
+                if not self.auto_restart:
+                    raise self._died("earlier")
+                self.restart()   # died between requests (killed, crashed after answering): recover, then go on
             try:
-                self.proc.stdin.write(line + "\n")
-                self.proc.stdin.flush()
-            except (BrokenPipeError, OSError):
-                raise self._died("while sending")
-            msg = self._wait(req_id, timeout or self.timeout)
+                msg = self._send(method, params, timeout)
+            except MMError as e:
+                if e.code not in FATAL_CODES or not self.auto_restart:
+                    raise
+                self.kill()
+                e.recovery = self.restart()
+                e.message += "; " + e.recovery["summary"]
+                e.args = ("%s: %s" % (e.code, e.message),)
+                raise e
         self.last_warnings = msg.get("warnings", [])
         if not msg.get("ok"):
             err = msg.get("error") or {}
             raise MMError(err.get("code", "error"), err.get("message", "unknown error"), msg)
-        return msg.get("result", {})
+        result = msg.get("result", {})
+        self._track(method, params, result)
+        return result
+
+    def _send(self, method, params, timeout=None):
+        if self.proc.poll() is not None:
+            raise self._died("earlier")
+        req_id = self._next_id
+        self._next_id += 1
+        try:
+            line = json.dumps({"id": req_id, "method": method, "params": params}, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as e:
+            raise MMError("bad_params", "%s: parameters are not JSON (%s)" % (method, e))
+        if len(line.encode("utf-8")) > MAX_REQUEST_BYTES:
+            raise MMError("bad_params", "%s: request too large (%d bytes, max %d)" % (method, len(line.encode("utf-8")),
+                                                                                   MAX_REQUEST_BYTES))
+        try:
+            self.proc.stdin.write(line + "\n")
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            raise self._died("while sending")
+        if timeout is None:
+            timeout = min(self.timeout, LIGHT_TIMEOUT) if method in LIGHT_METHODS else self.timeout
+        return self._wait(req_id, timeout)
+
+    def _track(self, method, params, result):
+        """Remember what a restart has to restore."""
+        if method == "load":
+            self.graph_path = result.get("path") or params.get("path")
+            self.edits = []
+        elif method == "save":
+            self.graph_path = result.get("path") or params.get("path") or self.graph_path
+            self.edits = []
+        elif method in EDIT_METHODS:
+            self.edits.append((method, copy.deepcopy(params)))
+
+    def restart(self, reload=True):
+        """Kill the engine, start a new one and (reload=True) load the last loaded/saved graph and replay the
+        edits made since. If replaying crashes the engine again, retries with the graph only. Returns a report:
+        {restarted, graph, replayed, edits_lost, errors, summary}; raises MMError("start_failed") if no engine starts."""
+        with self._lock:
+            self.kill()
+            self.restarts += 1
+            self._start()
+            report = {"restarted": True, "graph": None, "replayed": 0, "edits_lost": 0, "errors": []}
+            path, edits = self.graph_path, list(self.edits)
+            self.graph_path, self.edits = None, []
+            if reload and path:
+                for attempt_edits in (edits, []):
+                    try:
+                        self._restore(path, attempt_edits, report)
+                        break
+                    except MMError as e:
+                        if e.code not in FATAL_CODES:
+                            raise
+                        report["errors"].append("restoring crashed the engine again (%s)" % e.message)
+                        self.kill()
+                        self.restarts += 1
+                        self._start()
+                        self.graph_path, self.edits = None, []
+                        report.update(graph=None, replayed=0)
+            elif edits:
+                report["edits_lost"] = len(edits)
+            report["summary"] = _recovery_summary(report, path, len(edits) if reload else 0)
+            self.last_recovery = report
+            return report
+
+    def _restore(self, path, edits, report):
+        msg = self._send("load", {"path": path})
+        if not msg.get("ok"):
+            report["errors"].append("cannot reload %s: %s" % (path, (msg.get("error") or {}).get("message")))
+            report["edits_lost"] = len(edits)
+            return
+        self._track("load", {"path": path}, msg.get("result", {}))
+        report["graph"] = path
+        for i, (method, params) in enumerate(edits):
+            msg = self._send(method, params)
+            if not msg.get("ok"):
+                report["errors"].append("replaying %s failed: %s" % (method, (msg.get("error") or {}).get("message")))
+                report["edits_lost"] = len(edits) - i
+                return
+            self._track(method, params, msg.get("result", {}))
+            report["replayed"] += 1
+        report["edits_lost"] = 0
 
     def kill(self):
-        if self.proc.poll() is None:
+        if self.proc is not None and self.proc.poll() is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGKILL)
             except OSError:
                 self.proc.kill()
             self.proc.wait()
+        if self.proc is not None and self.proc.stdin and not self.proc.stdin.closed:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
 
     def close(self, timeout=CLOSE_TIMEOUT):
         """Ask the server to quit; kill it if it does not. Returns the exit code."""
         if self.proc.poll() is None:
             try:
-                self.call("shutdown", timeout=timeout)
+                self._send("shutdown", {}, timeout)   # not call(): no recovery while closing
             except MMError:
                 pass
             try:
@@ -169,7 +309,8 @@ class MMClient:
             try:
                 self.proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                self.kill()
+                pass
+        self.kill()   # if still running; closes our end of stdin either way
         if self._log is not subprocess.DEVNULL:
             self._log.close()
             self._log = subprocess.DEVNULL
@@ -234,6 +375,20 @@ class MMClient:
 
 def _opt(**kw):
     return {k: v for k, v in kw.items() if v is not None}
+
+
+def _recovery_summary(report, path, n_edits):
+    if report["graph"]:
+        text = "engine restarted, reloaded %s" % Path(report["graph"]).name
+        if n_edits:
+            text += " and replayed %d of %d edits made since it was loaded/saved" % (report["replayed"], n_edits)
+    elif path:
+        text = "engine restarted, but the graph could not be restored (load it again)"
+    else:
+        text = "engine restarted (no graph had been loaded)"
+    if report["errors"]:
+        text += " [%s]" % "; ".join(report["errors"])
+    return text
 
 
 # ---------------------------------------------------------------------------
