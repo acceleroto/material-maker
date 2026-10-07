@@ -18,6 +18,8 @@ Subcommands:
             --ref <photo> sets the run's target photo (shown beside the 3D preview on every sheet).
   palette   Dominant colours of a reference photo (hex + share) and a ready colorize gradient.
   compare   [reference photo | 3D preview] + palette strips as one PNG.
+  to-unity  Export into a Unity project (Assets/Materials/Generated/<Name>/) with the target that matches
+            the project's render pipeline; keeps GUIDs on re-export; --verify runs a Unity batchmode check.
   wait      Poll for the result of an export/run started elsewhere (e.g. the Terminal panel).
 
 Node type resolution mirrors MMLoader.create_gen (addons/material_maker/engine/loader.gd).
@@ -28,6 +30,7 @@ import argparse
 import difflib
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -1242,6 +1245,11 @@ DEFAULT_CONFIG = {
         "godot": "/Applications/Godot.app/Contents/MacOS/Godot",
         "project": str(REPO),
     },
+    "unity": {
+        "editor": "",            # Unity executable (…/Unity.app/Contents/MacOS/Unity) for to-unity --verify
+        "project": "",           # default --project
+        "verify_timeout": 900,   # seconds (a first batchmode launch imports the whole project)
+    },
 }
 
 
@@ -1262,14 +1270,17 @@ def load_config(path=None):
     return cfg
 
 
-def export_command(cfg, ptex, out_dir, target, size=None):
+def export_command(cfg, ptex, out_dir, target, size=None, output_name=None):
     """argv for one CLI export. Paths must be absolute (the app changes its cwd on macOS).
-    size: texture size in pixels (source mode only; None/0 = the graph's own size)."""
+    size: texture size in pixels (source mode only; None/0 = the graph's own size).
+    output_name: file prefix instead of the .ptex stem (source mode only; --output-file)."""
     mode = cfg["mode"]
     # --target, never -t (Godot swallows -t); --export-material, never --export (Godot project export).
     if mode == "release":
         if size:
             raise SystemExit("mmx: --size needs mode = \"source\" (the release app ignores --size)")
+        if output_name:
+            raise SystemExit("mmx: a custom output name needs mode = \"source\"")
         return [cfg["release"]["binary"], "--export-material", "--target", target, "-o", str(out_dir), str(ptex)]
     elif mode == "source":
         # Our parse_args.gd: --json summary line, exit codes 0/1/2/3, no silent target fallback.
@@ -1277,6 +1288,8 @@ def export_command(cfg, ptex, out_dir, target, size=None):
                "--strict-target", "--target", target]
         if size:
             cmd += ["--size", str(int(size))]
+        if output_name:
+            cmd += ["--output-file", output_name]
         return cmd + ["-o", str(out_dir), str(ptex)]
     else:
         raise SystemExit("mmx: unknown mode %r in config" % mode)
@@ -1325,8 +1338,9 @@ def find_material_node(ptex_data, cfg):
     return None, None
 
 
-def expected_files(ptex_path, out_dir, target, cfg):
-    """{"required": [...], "optional": [...], "targets": [...], "material_node": name} or {"error": ...}."""
+def expected_files(ptex_path, out_dir, target, cfg, output_name=None):
+    """{"required": [...], "optional": [...], "targets": [...], "material_node": name} or {"error": ...}.
+    output_name: file prefix instead of the .ptex stem."""
     data = load_json_lenient(ptex_path)
     node, sm = find_material_node(data, cfg)
     if node is None:
@@ -1339,8 +1353,9 @@ def expected_files(ptex_path, out_dir, target, cfg):
     inputs = sm.get("inputs", [])
     ports = {c.get("to_port") for c in data.get("connections", []) if c.get("to") == node["name"]}
     connected = {inputs[i]["name"] for i in ports if isinstance(i, int) and 0 <= i < len(inputs)}
-    prefix = str(Path(out_dir) / Path(ptex_path).stem)
-    ctx = {"$(path_prefix)": prefix, "$(file_prefix)": Path(ptex_path).stem,
+    stem = output_name or Path(ptex_path).stem
+    prefix = str(Path(out_dir) / stem)
+    ctx = {"$(path_prefix)": prefix, "$(file_prefix)": stem,
            "$(dir_prefix)": str(out_dir), "$(path_separator)": "/"}
     required, optional = [], []
     for f in sm["exports"][target].get("files", []):
@@ -1389,7 +1404,7 @@ def parse_mm_summary(text):
 
 
 def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=False, skip_validate=False,
-               size=None):
+               size=None, output_name=None):
     """Validate, export with the MM binary, check outputs. Returns a JSON-able summary
     (also written to <out_dir>/mmx_result.json)."""
     import os
@@ -1420,7 +1435,7 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
         if not v["ok"]:
             return done(error="validation failed; fix the errors (mmx validate %s)" % ptex)
     res["stage"] = "plan"
-    exp = expected_files(ptex, out_dir, target, cfg)
+    exp = expected_files(ptex, out_dir, target, cfg, output_name)
     if "error" in exp:
         return done(error=exp["error"])
     res["connected_inputs"] = exp["connected_inputs"]
@@ -1434,7 +1449,7 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
             Path(f).unlink(missing_ok=True)
 
     res["stage"] = "export"
-    cmd = export_command(cfg, ptex, out_dir, target, size)
+    cmd = export_command(cfg, ptex, out_dir, target, size, output_name)
     log_path = out_dir / "export.log"
     err_path = out_dir / "export.stderr.log"
     res["log"] = str(log_path)
@@ -2118,6 +2133,74 @@ def wait_for_result(path=None, run_name=None, timeout=300.0, fresh=60.0, runs_di
         time.sleep(poll)
 
 
+def to_unity(ptex, project, name, target=None, size=None, verify=False, editor=None, cfg=None, timeout=None,
+             verify_timeout=None, skip_validate=False):
+    """Export `ptex` into <project>/Assets/Materials/Generated/<name>/ (see unity_handoff.py).
+    Returns a JSON-able summary; staging + logs in agent_runs/to-unity/<name>/."""
+    import unity_handoff as uh
+    cfg = cfg or load_config()
+    rv = {"ok": False, "stage": "project", "ptex": str(Path(ptex).resolve()), "name": name}
+    try:
+        uh.check_name(name)
+        project = uh.check_project(project or cfg["unity"].get("project") or "")
+        rv["project"] = str(project)
+        rv["unity_version"] = uh.project_version(project)
+        rv["stage"] = "pipeline"
+        if target:
+            rv["target"], rv["target_source"] = target, "--target"
+        else:
+            det = uh.detect_pipeline(project)
+            rv["pipeline"] = {k: det[k] for k in ("pipeline", "source", "assets", "packages")}
+            rv["target"], rv["target_source"] = det["target"], "detected"
+    except uh.HandoffError as e:
+        rv["error"] = str(e)
+        return rv
+    folder = (uh.GENERATED_DIR / name).as_posix()
+    dest = project / folder
+    work = RUNS_DIR / "to-unity" / name
+    stage = work / "export"
+    if stage.exists():
+        shutil.rmtree(stage)
+    rv.update(stage="export", folder=folder, dest=str(dest), work_dir=str(work))
+    exp = run_export(ptex, stage, rv["target"], cfg, timeout, skip_validate=skip_validate, size=size,
+                     output_name=name)
+    rv["export"] = {k: exp.get(k) for k in ("ok", "stage", "error", "seconds", "warnings", "log_errors", "mm",
+                                            "validation", "missing") if exp.get(k) not in (None, [], {})}
+    if not exp["ok"]:
+        rv["error"] = "export failed: %s" % exp.get("error")
+        return rv
+    rv["stage"] = "copy"
+    try:
+        rv.update(uh.sync_into_project(stage, dest, name))
+    except (uh.HandoffError, OSError) as e:
+        rv["error"] = "copy into the project failed: %s" % e
+        return rv
+    rv["material"] = "%s/%s.mat" % (folder, name)
+    open_pids = uh.editor_processes(project)
+    if open_pids:
+        rv["editor_open"] = open_pids
+    if verify:
+        rv["stage"] = "verify"
+        editor = editor or cfg["unity"].get("editor")
+        v = uh.verify(editor or "", project, folder, work, verify_timeout or cfg["unity"]["verify_timeout"])
+        rv["verify"] = v
+        if not v["ok"]:
+            rv["error"] = v.get("error", "verification failed")
+            return rv
+    rv.update(ok=True, stage="done")
+    return rv
+
+
+def cmd_to_unity(args):
+    res = to_unity(args.ptex, args.project, args.name, args.target, args.size, args.verify, args.unity,
+                   load_config(args.config), args.timeout, args.verify_timeout, args.no_validate)
+    if RUNS_DIR.is_dir() and res.get("work_dir"):
+        Path(res["work_dir"]).mkdir(parents=True, exist_ok=True)
+        _write_json(Path(res["work_dir"]) / "to_unity_result.json", res)
+    print(json.dumps(res, indent=1, ensure_ascii=False))
+    return 0 if res["ok"] else 1
+
+
 def cmd_wait(args):
     if bool(args.dir) == bool(args.run_name):
         raise SystemExit("mmx wait: give a directory or --run-name (not both)")
@@ -2220,6 +2303,21 @@ def main(argv=None):
     p.add_argument("--width", type=int, default=1536)
     p.add_argument("--out", help="output PNG (default <preview stem>_vs_ref.png next to the preview)")
     p.set_defaults(fn=cmd_compare)
+    p = sub.add_parser("to-unity", help="export into <project>/Assets/Materials/Generated/<Name>/ with the project's "
+                       "pipeline target; JSON, exit 0/1")
+    p.add_argument("ptex")
+    p.add_argument("--project", help="Unity project root (default [unity] project in mmx.toml)")
+    p.add_argument("--name", required=True, help="material name: folder, .mat and texture prefix (letters, digits, _ -)")
+    p.add_argument("--target", help="override the detected target (Unity/URP, Unity/HDRP, Unity/3D)")
+    p.add_argument("--size", type=int, help="texture size in pixels (default: the graph's own size)")
+    p.add_argument("--no-validate", action="store_true", help="skip mmx validate")
+    p.add_argument("--verify", action="store_true", help="then run Unity -batchmode with MMAgentVerify "
+                   "(the editor must be closed; installs Assets/Editor/MaterialMakerAgent/MMAgentVerify.cs)")
+    p.add_argument("--unity", help="Unity executable (default [unity] editor in mmx.toml)")
+    p.add_argument("--verify-timeout", type=float, help="seconds for the Unity run (default 900)")
+    p.add_argument("--timeout", type=float, help="seconds before the MM export is killed (default from mmx.toml)")
+    p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
+    p.set_defaults(fn=cmd_to_unity)
     p = sub.add_parser("wait", help="wait for an export/run started elsewhere (Terminal panel); print its result")
     p.add_argument("dir", nargs="?", help="export out dir or iteration dir")
     p.add_argument("--run-name", help="wait for this run's newest iteration")

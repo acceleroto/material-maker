@@ -18,3 +18,8 @@ data_dir = "/Applications/Material Maker.app/Contents/MacOS"   # nodes/ used to 
 [source]
 godot = "/Applications/Godot.app/Contents/MacOS/Godot"
 project = "/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker"
+
+[unity]
+editor = "/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app/Contents/MacOS/Unity"   # for to-unity --verify
+project = "/Volumes/External1/Users/bryan/Documents/MM-Agent-Test"                   # default --project
+verify_timeout = 900    # seconds; the first batchmode launch imports the whole project
