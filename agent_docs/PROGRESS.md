@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 6.3 (in progress)
+**Current session:** 6.3 (complete); project done, maintenance mode
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -271,22 +271,26 @@
   21 (fake Unity), mmx 61. Docs: README "Unity hand-off", SKILL.md + AGENTS.md "Handing off to Unity" (AGENTS
   regenerated from the skill), CLAUDE.md, ARCHITECTURE.md.
 
+- 6.3 (agent, 2026-10-07): acceptance run, written up in `agent_docs/ACCEPTANCE.md` (previews in `agent_docs/acceptance/`).
+  7 materials, skill tools only (MCP tools not loaded: the session started outside the repo root, so the mmx CLI path was
+  used), cap 8, all delivered + `--verify` OK in MM-Agent-Test `Assets/Materials/Generated/`: GraniteCliff 7 it. (3.2 min),
+  ChippedPaintMetal 6 (2.1), StylizedLava 5 (1.9), SciFiFloorPanels 4 (1.7), CarraraMarbleTiles 6 (4.5, partial: graphic
+  veins), BarkPhotoMatch 7 (luma 0.478 vs 0.477), PlanksPhotoMatch 6 (0.310 vs 0.318; regular stagger instead of random plank
+  lengths). Photos: ambientCG Bark012 + Planks023A (CC0, user OK'd downloads) in `agent_refs/`; user steered both photo runs
+  after iteration 4. Finding: Unity sometimes crashes on batchmode shutdown after an OK verify report (exit -10) -> `to-unity`
+  says ok false with an empty message; rerun passed. Runs in `agent_runs/6.3/<run>/` (gitignored).
+
 ## In progress
-- 6.3 acceptance run: text 1-3 done + delivered (GraniteCliff 7 it., ChippedPaintMetal 6, StylizedLava 5; runs in
-  `agent_runs/6.3/<run>/`, previews in `agent_docs/acceptance/`). Photos downloaded (CC0 ambientCG Bark012, Planks023A in
-  `agent_refs/`). Left: text 4 (sci-fi panels), text 5 (marble tiles), photos, `--verify`, ACCEPTANCE.md.
+- None.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 6.3 per ROADMAP.md "### 6.3" (acceptance test): only the skill/MCP tools; 5 text requests (mix of natural,
-  man-made, stylized, realistic) + 2 photo-reference requests (ask the user for photos; they go in `agent_refs/`),
-  max 8 iterations each, each delivered with `mmx to-unity <final ptex> --name <Name>` into MM-Agent-Test
-  (add `--verify` once at the end per material if the Unity editor is closed). Write `agent_docs/ACCEPTANCE.md` (final
-  preview, iteration count, time, honest notes per material). Commit; PROGRESS next: done / maintenance mode.
-- Note for 6.3: `Assets/Materials/Generated/MMA_Bricks/` in MM-Agent-Test is the 6.2 test material (fine to keep or
-  delete); `Assets/Editor/MaterialMakerAgent/MMAgentVerify.cs` is installed there by `--verify`.
-- Still open (carried over): start Claude Code in the repo root once and try `mcp__material-maker__load` +
-  `render_preview` to confirm images show in chat; with it, try `mmx compare` on an MCP render.
+- Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
+- User: grade the 7 materials in MM-Agent-Test (ROADMAP 6.3 "Grade it") and hand any fixes to a short follow-up session.
+- Maintenance candidates (from ACCEPTANCE.md "Findings"): `to-unity --verify` should report "Unity exited with code N after
+  an OK report" (and maybe retry once) instead of an empty error; start Claude Code in the repo root once to test the
+  `mcp__material-maker__*` tools in-chat; skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
+  random-length plank layouts; merge `upstream/master` into `agent` when upstream releases.
 - Still open for the user: Checkpoint 4 review (`agent_docs/phase1_report.md` vs `agent_docs/phase4_report.md`).
