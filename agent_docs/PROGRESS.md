@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 6.1 (complete); next 6.2
+**Current session:** 6.2 (complete); next 6.3
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -249,6 +249,28 @@
   palette match (albedo luma 0.308 vs photo 0.306, which also confirms gradient colours land 1:1 in the albedo PNG);
   iter 3 mossy mortar + wider stone range. Left: per-stone mottling, moss creeping onto stones, chipped faces.
 
+- 6.2 (agent, 2026-10-07): Unity hand-off. `mmx to-unity <ptex> --project <root> --name <Name> [--verify]`
+  (`agent_tools/unity_handoff.py`; defaults in `mmx.toml [unity]`: editor
+  `/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app/Contents/MacOS/Unity`, project MM-Agent-Test). Target from the
+  project's pipeline (GraphicsSettings + every QualitySettings level → pipeline asset by GUID → `m_Script` GUID/content;
+  none → Built-in `Unity/3D`; fallback = installed package; `--target` overrides). Export with `--output-file <Name>`
+  (mmx `output_name`), copied into `Assets/Materials/Generated/<Name>/`: existing texture/material GUIDs kept on
+  re-export (new `.mat` rewritten to them; `<Name>.mat.meta` created once), stale maps removed, other files untouched.
+  **Finding:** MM's Unity `.meta` templates are invalid YAML (tab-indented nested blocks; the normal map's flattened),
+  so Unity ignored every nested importer setting: data maps (metal_smoothness, occlusion, height) imported as sRGB in a
+  Linear project. `to-unity` now writes clean metas (albedo/emission sRGB, normal NormalMap, others linear, Repeat,
+  maxTextureSize ≥ PNG); confirmed in batchmode. Upstream templates untouched (`mmx export`/`run` outputs still have
+  MM's metas). `--verify`: installs `Assets/Editor/MaterialMakerAgent/MMAgentVerify.cs`, runs
+  `Unity -batchmode -quit -executeMethod MMAgentVerify.Run` (import folder; shader found/compiles/supported/matches
+  pipeline; every `.mat` texture GUID resolves + is a shader property; importer checks; JSON report + log in
+  `agent_runs/to-unity/<Name>/`); refuses while an editor has the project open (matched by argv, `stage: editor_open`);
+  license failure → `stage: license`. **No license step needed** (Hub signed in; the editor uses the Hub's licensing
+  client). Runs: throwaway copy of MM-Agent-Test (fresh import 43 s, warm ~11 s) ok; deliberately broken copy (built-in
+  shader + dangling texture GUID) → both errors reported, exit 1; real MM-Agent-Test `MMA_Bricks` (bricks, 1024)
+  ok in 13.8 s: URP/Lit, 5/5 textures resolved, data maps linear, normal = NormalMap. Tests: `test_unity_handoff.py`
+  21 (fake Unity), mmx 61. Docs: README "Unity hand-off", SKILL.md + AGENTS.md "Handing off to Unity" (AGENTS
+  regenerated from the skill), CLAUDE.md, ARCHITECTURE.md.
+
 ## In progress
 - None.
 
@@ -256,11 +278,13 @@
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 6.2 per ROADMAP.md "### 6.2" (Unity hand-off): needs the user's Unity editor executable path first (Unity Hub →
-  Installs → ⚙ → Show in Finder) and the Unity editor closed. Then `mmx to-unity <ptex> --project <UNITY PATH> --name
-  <MaterialName>` exporting into `Assets/Materials/Generated/<MaterialName>/`, plus an optional batchmode verification
-  (Editor script via `-batchmode -quit -executeMethod`, log to a file); stop and tell the user if licensing blocks it.
-  Commit; PROGRESS next 6.3.
+- Session 6.3 per ROADMAP.md "### 6.3" (acceptance test): only the skill/MCP tools; 5 text requests (mix of natural,
+  man-made, stylized, realistic) + 2 photo-reference requests (ask the user for photos; they go in `agent_refs/`),
+  max 8 iterations each, each delivered with `mmx to-unity <final ptex> --name <Name>` into MM-Agent-Test
+  (add `--verify` once at the end per material if the Unity editor is closed). Write `agent_docs/ACCEPTANCE.md` (final
+  preview, iteration count, time, honest notes per material). Commit; PROGRESS next: done / maintenance mode.
+- Note for 6.3: `Assets/Materials/Generated/MMA_Bricks/` in MM-Agent-Test is the 6.2 test material (fine to keep or
+  delete); `Assets/Editor/MaterialMakerAgent/MMAgentVerify.cs` is installed there by `--verify`.
 - Still open (carried over): start Claude Code in the repo root once and try `mcp__material-maker__load` +
   `render_preview` to confirm images show in chat; with it, try `mmx compare` on an MCP render.
 - Still open for the user: Checkpoint 4 review (`agent_docs/phase1_report.md` vs `agent_docs/phase4_report.md`).
