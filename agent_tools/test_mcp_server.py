@@ -336,6 +336,30 @@ class TestRealEngine(unittest.TestCase):
             finally:
                 tools.close()
 
+    def test_engine_crash_recovery(self):
+        with tempfile.TemporaryDirectory() as t:
+            tools = MaterialMakerTools(out_root=Path(t) / "out", log_path=Path(t) / "engine.log")
+            server = MCPServer(tools, out=io.StringIO())
+
+            def tool(_tool, **args):
+                r = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": _tool, "arguments": args}})["result"]
+                return r, json.loads(r["content"][0]["text"])
+            try:
+                tool("load", path=str(BRICKS))
+                r, p = tool("add_node", type="perlin", name="extra", position=[100, 200])
+                self.assertFalse(r["isError"], p)
+                os.kill(tools.mm.proc.pid, 9)
+                tools.mm.proc.wait(10)
+                r, p = tool("render_preview", size=64)
+                self.assertFalse(r["isError"], p)
+                self.assertIn("reloaded bricks.ptex and replayed 1 of 1 edits", p["warnings"][0])
+                self.assertEqual(r["content"][1]["type"], "image")
+                r, p = tool("describe_node", node="extra")
+                self.assertFalse(r["isError"], p)
+            finally:
+                tools.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -75,6 +75,8 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
 - MCP server (since 5.2): `agent_tools/mcp_server.py` wraps `--serve` as MCP tools (`mcp__material-maker__*`,
   registered in `.mcp.json`); render tools return images. Prefer it for material iteration when loaded;
   `python3 agent_tools/mcp_server.py --check` tests the engine start. README "MCP server" (also Codex setup).
+  Since 5.3 a crash/timeout restarts the engine and restores the last loaded/saved graph + edits (MMClient).
+- Component overview: `agent_docs/ARCHITECTURE.md`.
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
   `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).
 

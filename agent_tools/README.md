@@ -277,12 +277,20 @@ One JSON object per line on stdin; one per line on stdout. Requests are processe
 | `set_param` | `node` + `name, value`, or `node` + `params: {name: value}` | `changed: [{name, old, new}]` |
 | `get_graph` | `node?` (a sub-graph), `full?` | compact `nodes [{name, type, parameters}]`, `connections`; `full: true` = the `.ptex` dict |
 | `validate` | – | as `--validate` for one file: `ok, nodes, outputs_checked, errors, warnings` |
-| `render_output` | `node, output`, `port?`, `size?` (512) | as `--render-output` |
-| `render_preview` | `output`, `mesh?` (`sphere+plane` or a list), `env?` (Studio), `size?` (512) | as `--render-preview` |
-| `export` | `output_dir`, `target?` (Unity/URP, strict), `size?` (0 = graph's), `prefix?` (file stem), `overwrite?` (true) | `files, deleted, target, size` |
+| `render_output` | `node, output`, `port?`, `size?` (512, 16..8192) | as `--render-output` |
+| `render_preview` | `output`, `mesh?` (`sphere+plane` or a list), `env?` (Studio), `size?` (512, 16..4096 per view) | as `--render-preview` |
+| `export` | `output_dir`, `target?` (Unity/URP, strict), `size?` (0 = graph's, max 8192), `prefix?` (file stem), `overwrite?` (true) | `files, deleted, target, size` |
 | `shutdown` | – | `bye`; then exit 0 |
 
-Every result also has `seconds`. **Parameter values** are checked against the definition: float = number,
+Every result also has `seconds`. `add_node` `position` is `[x, y]` or `{"x", "y"}`.
+**Warnings instead of silent failures** (5.3): `load` warns about nodes of unknown types and connections the
+loader dropped (it skips them silently) and about file parameters (`image` node, text font) naming missing files
+(they render blank); `add_node`/`set_param` warn about such missing files, and `validate` (also the CLI
+`--validate`) reports them as `missing_file` warnings. **Size limits:** render 16..8192 px, preview ≤ 4096 px per
+view (3×4096 ≈ 9 s), export ≤ 8192 (bricks at 8192 ≈ 35 s; 16384 textures need GBs of video memory each; the
+CLI `--size` has the same cap). Measured in 5.3, none of these crash the engine: 8192 node render ~5 s, export
+at a non-power-of-two size (3000) works.
+**Parameter values** are checked against the definition: float = number,
 numeric string, or an expression of `$` variables (`"$time*0.1"`; other strings would be pasted into GLSL);
 enum = index or value name (`"multiply"`); size = exponent within `first..last`; boolean; color =
 `{r,g,b,a}` / `[r,g,b(,a)]` / `"#rrggbb"`; gradient/curve/polygon/... = the object as in `get_graph full=true`
@@ -313,9 +321,21 @@ with MMClient(log_path="agent_runs/x/server.log") as mm:   # Godot/project paths
     mm.export("agent_runs/x/out")                            # target from mmx.toml
 ```
 Each method returns the result dict or raises `MMError(code, message)`; `last_warnings` holds the last
-request's warnings, `noise` the engine's recent stdout lines. Timeouts (default 180 s per request) kill the
-server (`MMError("timeout")`); a dead server raises `server_died`. `close()` / the context manager sends
-`shutdown`. CLI:
+request's warnings, `noise` the engine's recent stdout lines. `close()` / the context manager sends `shutdown`.
+
+**Timeouts:** 180 s per request (mmx.toml `timeout`), capped at 60 s for methods that neither render nor compile
+(`set_param`, `connect`, `get_graph`, ...), so a hang there is noticed sooner; a timeout kills the engine.
+**Crash recovery** (`auto_restart=True`, the default; Session 5.3): the client remembers the last successfully
+loaded/saved graph and the edits made since (`add_node`, `remove_node`, `connect`, `disconnect`, `set_param`).
+When a request times out or the engine dies, it starts a new engine, loads that graph and replays the edits, then
+raises `MMError("timeout"|"server_died")` for the failed request (not repeated, since it may crash again), with
+`e.recovery = {graph, replayed, edits_lost, errors, summary}` and the summary appended to the message. If
+replaying crashes the engine again, it retries with the graph alone. An engine that died between requests is
+recovered before the next request (`last_recovery`). `restart(reload=True)` does the same on demand.
+`auto_restart=False` keeps the old behaviour (`server_died` on every later call). Other guards: Godot binary and
+`project.godot` are checked before launching (`start_failed`), parameters that aren't JSON (NaN, objects) or
+requests over 4 MiB (the server's line buffer) raise `bad_params` without being sent, and a `parse_error`
+without id while a request is pending is taken as its answer (no 180 s wait). CLI:
 - `python3 agent_tools/mm_client.py batch <file.jsonl> [--log f]`: one `{"method", "params"}` per line (`#` comments),
   one result line each, through one server; exit 1 if any request failed.
 - `python3 agent_tools/mm_client.py bench <ptex> --node N --param P --values 2,4,8 [--render-node M] [--export]
@@ -335,14 +355,19 @@ and the images of render steps) and `restart`. `render_preview` / `render_output
 `image` content block (plus the JSON result as text), so the agent sees it without reading a file
 (`return_image: false` skips it; a 2×512 preview is ~0.5 MB).
 - The engine starts on the first tool call that needs it (~1.3–2 s) and stays up for the session. Engine stderr:
-  `agent_runs/mcp/engine.log`. A `timeout` (mmx.toml `timeout`, 180 s) or crash kills it; the error says so and
-  the next call starts a new engine (the graph must be loaded again; unsaved edits are lost).
+  `agent_runs/mcp/engine.log` (restarts are appended, marked `--- mm_client: engine restart N ---`). A `timeout`
+  or crash restarts it at once through MMClient's recovery (reload the last loaded/saved graph, replay the edits
+  since): the failed tool call is an error saying what was restored and that the call was not repeated; if the
+  engine died between calls, the next result carries a `the engine had exited; ...` warning. `restart` does it on
+  demand (`reload: false` = no graph).
 - Relative paths resolve against the repo root. Omitted outputs go to `agent_runs/mcp/<graph stem>/`:
   `preview_NNN.png`, `node_<node>_p<port>_NNN.png` (numbered, earlier renders are kept), `export/`
   (prefix = graph stem, target/preview defaults from `mmx.toml`).
 - Tool failures are results with `isError: true` and text `code: message` (engine codes as in "Server mode",
-  plus `bad_params` for unknown/missing arguments, checked before the engine is called); protocol errors are
-  JSON-RPC errors. Warnings are in the result's `warnings`. Only MCP messages go to stdout.
+  plus `bad_params` for unknown/missing arguments and wrong types/ranges, e.g. `render_preview.size must be <=
+  2048 (got 100000)`, checked against the tool schemas before the engine is called); protocol errors are JSON-RPC
+  errors (non-object `params`/`arguments` → -32602, empty batch → -32600). Images over 8 MB are written but not
+  inlined (`images_not_inlined`: render smaller to see them). Warnings are in the result's `warnings`. Only MCP messages go to stdout.
 - MCP: protocol versions 2024-11-05 … 2025-11-25 (echoes the client's), capabilities `tools` only; tool
   annotations mark read-only tools.
 - `python3 agent_tools/mcp_server.py --check` starts the engine once and prints its ready info (exit 0/1);
@@ -370,7 +395,8 @@ tool_timeout_sec = 300
 Check with `codex mcp list`. AGENTS.md tells Codex to prefer these tools when present.
 
 Tests: `agent_tools/.venv/bin/python -m unittest agent_tools/test_mcp_server.py` (fake engine for the protocol,
-tool mapping, batch, crash/timeout recovery and a stdio subprocess session; one real-engine test ~5 s,
+tool mapping, argument checks, batch, crash/timeout recovery and a stdio subprocess session; real-engine tests
+(edit/render/export, SIGKILL recovery) ~7 s,
 `MMX_SKIP_ENGINE=1` skips it). Design ideas (lazy engine start, `--check` preflight, a batch tool that stops
 at the first failing op) came from graysonchalmers/Tool-MaterialMaker-MCP (MIT); no code was copied.
 

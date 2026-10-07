@@ -1,6 +1,6 @@
 # Progress
 
-**Current session:** 5.3 (in progress)
+**Current session:** 5.3 (complete); next 6.1
 
 ## Done
 - 0.0: Project rules (`CLAUDE.md`), progress tracking (`agent_docs/PROGRESS.md`,
@@ -209,19 +209,38 @@
   when they are available" section, sweeps via `batch`). Not checked: the tools inside a live Claude Code / Codex chat
   (this session was started outside the repo, so `.mcp.json` wasn't loaded here).
 
+- 5.3 (agent, 2026-10-07): hardening. **Crash recovery** in `MMClient` (default `auto_restart=True`): it tracks the last
+  successfully loaded/saved graph + the edits since (add_node/remove_node/connect/disconnect/set_param); on a timeout or
+  engine death it starts a new engine, reloads that graph, replays the edits, then raises the original
+  `timeout`/`server_died` with `e.recovery` + a summary (failed request not repeated); replay crashing again → graph
+  only; engine dead between requests → recovered before the next one (`last_recovery`); `restart(reload=)`. Restarts
+  append to the same log. **Timeouts:** non-render methods capped at 60 s (`LIGHT_METHODS`), others mmx.toml 180 s.
+  **Malformed/unsendable requests:** NaN/non-JSON params and >4 MiB lines → `bad_params` client-side; an id-less
+  `parse_error` while a request is pending is its answer (was a 180 s wait); Godot binary / `project.godot` checked
+  before launch. **Engine (`cli_serve.gd`/`cli_inspect.gd`):** load warns about nodes of unknown types / connections
+  the loader silently dropped and about missing files (image node, font); add_node/set_param warn on missing files;
+  `validate` (+ CLI) gives `missing_file` warnings; loading a directory says so; `add_node` position takes `[x, y]`
+  (the MCP schema already sent arrays; the engine only took `{x,y}` → was a 5.2 bug); caps: preview ≤ 4096 per view,
+  export ≤ 8192 (also `parse_args.gd --size`). Probed (real engine, no crash): 8192 node render 5 s, 3×4096 preview
+  8.5 s, 8192 export 35 s, size 3000 export ok, missing/garbage/empty/array .ptex, unwritable save/export dirs, missing
+  output dirs (created). **MCP:** argument types/ranges checked against the schemas (`render_preview.size must be <=
+  2048`), non-object params/arguments → -32602, empty batch → -32600, images > 8 MB not inlined
+  (`images_not_inlined`), crash/timeout errors say what was restored, `restart` reloads by default (`reload: false`).
+  Tests: GUT 51; Python 115 (`test_mmx` + `test_mm_client` 47 incl. `TestRecovery` with a stateful fake engine and a
+  real SIGKILL test whose post-recovery render is byte-identical + `test_mcp_server` 26 incl. real-engine kill
+  recovery), ~2 min. Docs: `agent_docs/ARCHITECTURE.md` (one page), README (Server mode limits/warnings, client
+  timeouts + recovery, MCP), SKILL.md + AGENTS.md (recovery, save often, heed warnings), CLAUDE.md.
+  Not done: the in-chat check of `mcp__material-maker__*` (this session again started outside the repo root).
+
 ## In progress
-- 5.3: engine hardening + MMClient crash recovery + MCP arg checks committed; next: MCP real-engine recovery test,
-  docs (README), agent_docs/ARCHITECTURE.md, full test run.
+- None.
 
 ## Blockers
 - None. Exports run fine from the Bash tool (Terminal-panel fallback via `mmx wait` if `mmx` reports a timeout).
 
 ## Next step
-- Session 5.3 per ROADMAP.md "### 5.3" (hardening): crash recovery in `MMClient`/`mcp_server.py` (restart the engine and
-  reload the last saved graph; today `mcp_server.MaterialMakerTools._drop` just forgets the graph and asks the agent to
-  reload), timeouts, malformed requests, very large sizes, missing files; tests; run the full suite (GUT
-  `-gtest=res://test/test_cli_serve.gd,res://test/test_cli_inspect.gd,res://test/test_parse_args.gd`,
-  `agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py agent_tools/test_mm_client.py agent_tools/test_mcp_server.py`);
-  write `agent_docs/ARCHITECTURE.md` (one page). First, start Claude Code in the repo root and try the
-  `mcp__material-maker__*` tools once (load bricks, render_preview) to confirm images show up in a real chat.
+- Session 6.1 per ROADMAP.md "### 6.1" (photo references): `mmx palette <photo>` (5–8 dominant colours as hex + share),
+  a contact-sheet option placing the reference photo beside the 3D preview, a photo workflow in SKILL.md + AGENTS.md;
+  test with a CC0 photo (ask the user for one if none is in the repo); commit; PROGRESS next 6.2. Also once: start
+  Claude Code in the repo root and try `mcp__material-maker__load` + `render_preview` to confirm images show in chat.
 - Still open for the user: Checkpoint 4 review (`agent_docs/phase1_report.md` vs `agent_docs/phase4_report.md`).

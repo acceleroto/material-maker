@@ -51,7 +51,10 @@ per `mmx run`), and render tools **return the image directly** (no Read needed).
 - At the end: `validate`, `save`, `export` (Unity/URP maps + `.mat`); for a contact sheet of the final maps run
   `mmx run <saved ptex>` once.
 - Engine errors come back as `code: message` (e.g. `unknown_parameter` lists the valid names). After a
-  `timeout`/`server_died` the next call starts a fresh engine: `load` your last saved ptex again.
+  `timeout`/`server_died` the engine is restarted automatically with your last loaded/saved graph and the edits
+  made since replayed (the error says so); the failed call is not repeated, so change it (smaller size, other
+  edit) rather than retrying it as is. `save` often: it is the recovery point. Heed load/validate warnings
+  about unknown node types or missing image files (those render blank).
 Without the MCP server, use `mmx` as written below.
 
 ### The loop (cap: 8 iterations; stop earlier when it matches)
