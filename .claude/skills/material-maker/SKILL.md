@@ -8,7 +8,8 @@ description: Design a procedural PBR material in Material Maker from a text desc
 You build a `.ptex` graph (JSON), export it with Material Maker through `agent_tools/mmx.py`,
 look at the contact sheet (whose top row is Material Maker's own lit 3D preview), and repeat until
 it matches the request. Everything runs from the
-repo root: `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`.
+repo root (the folder with `project.godot`). First time on a machine: `python3 agent_tools/setup.py`
+(`agent_docs/GETTING_STARTED.md`).
 
 **When to use:** the user asks for a texture or material in words or with a photo ("dry cracked desert
 ground", "rusty metal for Unity"), wants an existing `.ptex` changed, previewed or exported to Unity, or asks

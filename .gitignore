@@ -33,3 +33,8 @@ agent_refs/
 
 # mmx venv (Pillow)
 agent_tools/.venv/
+
+# machine-specific mmx settings (agent_tools/setup.py)
+agent_tools/mmx.local.toml
+# Claude Code personal settings (permission allowlist of this machine)
+.claude/settings.local.json

@@ -1,10 +1,14 @@
 # CLAUDE.md — Material Maker Agent project
 
+> **Just want to make materials?** You don't need anything below. Set up with `python3 agent_tools/setup.py`
+> (see `agent_docs/GETTING_STARTED.md`) and follow the `material-maker` skill
+> (`.claude/skills/material-maker/SKILL.md`). The rest of this file is for maintaining this fork.
+
 Goal: make Material Maker usable by AI agents (design procedural materials from text or a
 reference photo, iterate visually, export to Unity). Work is split across sessions; see
 `agent_docs/ROADMAP.md` for the full plan (phases + session prompts) and `agent_docs/PROGRESS.md` for current state.
 
-## Start of every session
+## Start of every maintenance session (developing this fork, not using it)
 1. Read `agent_docs/PROGRESS.md` and do its "Next step".
 2. `git status` and confirm you are on branch `agent`.
 
@@ -41,7 +45,7 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
   poll with `mmx wait --run-name X` from Bash. Verify edits took effect by md5-diffing outputs
   against a baseline.
 
-## Paths on this machine
+## Paths on the maintainer's machine (yours: `agent_tools/mmx.local.toml`, written by `agent_tools/setup.py`)
 - Repo:              `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`
 - Godot 4.7.2:       `/Applications/Godot.app/Contents/MacOS/Godot`
 - Material Maker:    `/Applications/Material Maker.app/Contents/MacOS/Material Maker`

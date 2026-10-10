@@ -1,5 +1,8 @@
 # AGENTS.md — Material Maker Agent fork
 
+> **Using this to make materials?** Run `python3 agent_tools/setup.py` once (`agent_docs/GETTING_STARTED.md`),
+> then follow "Making a material from a description" below. "Project rules" are for developing this fork.
+
 Instructions for coding agents (Codex and others). Claude Code reads `CLAUDE.md` and the skill in
 `.claude/skills/material-maker/SKILL.md`; this file mirrors both. **Keep the material workflow below in sync
 with SKILL.md** (it is a copy of the skill body).
@@ -20,7 +23,8 @@ with SKILL.md** (it is a copy of the skill body).
 You build a `.ptex` graph (JSON), export it with Material Maker through `agent_tools/mmx.py`,
 look at the contact sheet (whose top row is Material Maker's own lit 3D preview), and repeat until
 it matches the request. Everything runs from the
-repo root: `/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker`.
+repo root (the folder with `project.godot`). First time on a machine: `python3 agent_tools/setup.py`
+(`agent_docs/GETTING_STARTED.md`).
 
 **When to use:** the user asks for a texture or material in words or with a photo ("dry cracked desert
 ground", "rusty metal for Unity"), wants an existing `.ptex` changed, previewed or exported to Unity, or asks

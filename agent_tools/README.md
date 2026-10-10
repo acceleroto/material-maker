@@ -464,25 +464,25 @@ and the images of render steps) and `restart`. `render_preview` / `render_output
   `--list-tools` prints the tool definitions; `--config`, `--timeout`, `--log`, `--engine-command` (tests).
 
 **Claude Code** (project scope, committed): `.mcp.json` at the repo root (written by
-`claude mcp add --scope project material-maker -- python3 <repo>/agent_tools/mcp_server.py`, absolute script
-path so it works from any subdirectory) and `"enabledMcpjsonServers": ["material-maker"]` in
+hand; the script path is relative to the repo root, so it is portable but needs Claude Code started in the
+repo root) and `"enabledMcpjsonServers": ["material-maker"]` in
 `.claude/settings.json` (no approval prompt). Tools appear as `mcp__material-maker__<tool>`; check with
-`claude mcp get material-maker` (should say Connected; that doesn't start the engine). On another machine,
-fix the path in `.mcp.json` and the paths in `mmx.toml`. The tools only load when the session's working
+`claude mcp get material-maker` (should say Connected; that doesn't start the engine). Machine-specific
+paths (Godot, Unity) live in the gitignored `agent_tools/mmx.local.toml` (`agent_tools/setup.py` writes it). The tools only load when the session's working
 directory is the repo (or below it): start Claude Code there, or in the desktop app move an existing session into
 the repo folder; the tools appear on the next turn (checked in-chat 2026-10-10: images show inline, preview ~0.5 s,
 edit + preview in one `batch` ~0.2 s, MCP export byte-identical to `mmx export`).
 
 **Codex** (user scope, `~/.codex/config.toml`):
 ```bash
-codex mcp add material-maker -- python3 "/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker/agent_tools/mcp_server.py"
+codex mcp add material-maker -- python3 "<absolute path to the repo>/agent_tools/mcp_server.py"
 ```
 then raise the per-tool timeout (Codex default 60 s; a 2048 export of a big graph can take longer) by adding
 `tool_timeout_sec = 300` under `[mcp_servers.material-maker]` in `~/.codex/config.toml`. Equivalent by hand:
 ```toml
 [mcp_servers.material-maker]
 command = "python3"
-args = ["/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker/agent_tools/mcp_server.py"]
+args = ["<absolute path to the repo>/agent_tools/mcp_server.py"]
 tool_timeout_sec = 300
 ```
 Check with `codex mcp list`. AGENTS.md tells Codex to prefer these tools when present.

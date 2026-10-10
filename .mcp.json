@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "python3",
       "args": [
-        "/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker/agent_tools/mcp_server.py"
+        "agent_tools/mcp_server.py"
       ],
       "env": {}
     }

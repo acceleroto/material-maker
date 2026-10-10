@@ -1,3 +1,65 @@
+# Material Maker for AI agents (fork, branch `agent`)
+
+This branch of [acceleroto/material-maker](https://github.com/acceleroto/material-maker/tree/agent) turns
+[Material Maker](https://github.com/RodZill4/material-maker) into a tool **AI coding agents can drive**:
+describe a material in words (or give a reference photo), and an agent such as Claude Code or Codex builds the
+procedural graph, **looks at a lit 3D render of its own result**, iterates until it matches, and **delivers the
+material into a Unity project**. The output stays a real Material Maker `.ptex` graph you can open and keep
+editing in Material Maker.
+
+| Granite cliff | Chipped paint metal | Stylized lava | Sci-fi floor panels |
+|---|---|---|---|
+| <img src="agent_docs/acceptance/GraniteCliff.jpg" width="220"> | <img src="agent_docs/acceptance/ChippedPaintMetal.jpg" width="220"> | <img src="agent_docs/acceptance/StylizedLava.jpg" width="220"> | <img src="agent_docs/acceptance/SciFiFloorPanels.jpg" width="220"> |
+| **Carrara marble tiles** | **Bark (photo match)** | **Wood planks (photo match)** | |
+| <img src="agent_docs/acceptance/CarraraMarbleTiles.jpg" width="220"> | <img src="agent_docs/acceptance/BarkPhotoMatch.jpg" width="220"> | <img src="agent_docs/acceptance/PlanksPhotoMatch.jpg" width="220"> | |
+
+*Made by an agent from one-line requests, 4–15 iterations each, all delivered into a Unity 6 URP project
+(photo matches show the reference photo on the left). Write-up: [agent_docs/ACCEPTANCE.md](agent_docs/ACCEPTANCE.md).*
+
+### Point your agent at it
+
+> Clone `https://github.com/acceleroto/material-maker` (branch `agent`), follow
+> `agent_docs/GETTING_STARTED.md` to install it, then make me a weathered red roof-tile material
+> and put it in my Unity project at `~/Projects/MyGame`.
+
+Setup is one command after cloning (needs macOS, [Godot 4.7](https://godotengine.org/download), Python 3.11+,
+a desktop session; Unity optional):
+
+```bash
+git clone -b agent https://github.com/acceleroto/material-maker.git
+cd material-maker
+python3 agent_tools/setup.py
+```
+
+Then start Claude Code in the repo root (the MCP tools and the `material-maker` skill load automatically), or
+register the MCP server with Codex or any MCP client. Full guide:
+**[agent_docs/GETTING_STARTED.md](agent_docs/GETTING_STARTED.md)**.
+
+### What this fork adds
+
+- **MCP server** (`agent_tools/mcp_server.py`): 16 tools to load, edit, validate, render and export a graph in a
+  persistent engine; renders come back as images (about 0.2–0.5 s per edit + preview).
+- **Lit 3D preview** from the command line: Material Maker's own preview scene (sphere + plane, studio
+  lighting), so agents judge materials the way a person would, not from flat texture maps.
+- **`mmx` CLI** (`agent_tools/mmx.py`): validate (incl. shader compile), export with real exit codes and JSON,
+  per-iteration contact sheets, per-node debug renders, reference-photo palette matching.
+- **Unity hand-off**: `mmx to-unity` writes a `.mat` for the project's pipeline (URP/HDRP/Built-in) with correct
+  texture import settings, keeps GUIDs on re-export, and can verify the result in Unity batchmode.
+- **Agent instructions**: a Claude Code skill (`.claude/skills/material-maker/SKILL.md`) and
+  [`AGENTS.md`](AGENTS.md) with the iteration loop, photo matching and many Material Maker pitfalls.
+- **Engine fixes** for scripted use: `--size` honoured on export, exit codes, strict targets, no hangs on
+  hidden windows. Changes to upstream files are kept minimal; upstream is merged regularly.
+
+More: [how it fits together](agent_docs/ARCHITECTURE.md) · [all tools](agent_tools/README.md) ·
+[node reference](agent_docs/NODES.md) · [build log](agent_docs/PROGRESS.md).
+Status: tested on macOS (Apple Silicon) with Godot 4.7 and Unity 6000.5; Linux/Windows untested. Same MIT
+license as Material Maker. This fork is not affiliated with the Material Maker project; please don't send
+upstream bug reports about agent features.
+
+---
+
+*The original Material Maker README follows.*
+
 # Material Maker
 
 This is a tool based on [Godot Engine](https://godotengine.org/) that can

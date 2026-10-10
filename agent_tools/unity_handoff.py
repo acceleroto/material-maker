@@ -64,6 +64,34 @@ def project_version(project):
     return m.group(1) if m else None
 
 
+def find_editor(project=None):
+    """The Unity executable from a standard Unity Hub install: the editor matching the project's
+    ProjectVersion.txt if installed, else the newest one; "" if none is found."""
+    import sys
+    home = Path.home()
+    if sys.platform == "darwin":
+        roots = [Path("/Applications/Unity/Hub/Editor"), home / "Applications/Unity/Hub/Editor"]
+        exe = "Unity.app/Contents/MacOS/Unity"
+    elif sys.platform.startswith("win"):
+        roots = [Path("C:/Program Files/Unity/Hub/Editor")]
+        exe = "Editor/Unity.exe"
+    else:
+        roots = [home / "Unity/Hub/Editor"]
+        exe = "Editor/Unity"
+    found = {}
+    for root in roots:
+        if root.is_dir():
+            for d in root.iterdir():
+                if (d / exe).is_file():
+                    found.setdefault(d.name, str(d / exe))
+    if not found:
+        return ""
+    want = project_version(project) if project else None
+    if want in found:
+        return found[want]
+    return found[sorted(found, key=lambda v: [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", v)])[-1]]
+
+
 def _meta_guid(meta_path):
     try:
         with open(meta_path, errors="replace") as f:

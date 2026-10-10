@@ -1223,6 +1223,7 @@ def cmd_validate(args):
 # ---------------------------------------------------------------------------
 
 CONFIG_PATH = REPO / "agent_tools" / "mmx.toml"
+LOCAL_CONFIG_PATH = REPO / "agent_tools" / "mmx.local.toml"   # machine-specific overrides (gitignored)
 RUNS_DIR = REPO / "agent_runs"
 VENV_PYTHON = REPO / "agent_tools" / ".venv" / "bin" / "python"
 RESULT_NAME = "mmx_result.json"   # written by export/run; polled by `mmx wait`
@@ -1242,8 +1243,8 @@ DEFAULT_CONFIG = {
         "data_dir": "/Applications/Material Maker.app/Contents/MacOS",
     },
     "source": {
-        "godot": "/Applications/Godot.app/Contents/MacOS/Godot",
-        "project": str(REPO),
+        "godot": "",             # "" = auto-detect (find_godot)
+        "project": "",           # "" = this repo
     },
     "unity": {
         "editor": "",            # Unity executable (…/Unity.app/Contents/MacOS/Unity) for to-unity --verify
@@ -1253,20 +1254,50 @@ DEFAULT_CONFIG = {
 }
 
 
-def load_config(path=None):
-    """Defaults merged with mmx.toml (or $MMX_CONFIG / --config)."""
+def _merge(cfg, user):
+    for k, v in user.items():
+        if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+            cfg[k].update(v)
+        else:
+            cfg[k] = v
+
+
+def find_godot():
+    """A Godot 4 executable: $MMX_GODOT / $GODOT, `godot`/`godot4` on PATH, then the usual install places."""
     import os
+    import shutil
+    for env in ("MMX_GODOT", "GODOT"):
+        if os.environ.get(env) and Path(os.environ[env]).is_file():
+            return os.environ[env]
+    for name in ("godot", "godot4", "Godot"):
+        found = shutil.which(name)
+        if found:
+            return found
+    candidates = sorted(Path("/Applications").glob("Godot*.app/Contents/MacOS/Godot"))
+    candidates += sorted((Path.home() / "Applications").glob("Godot*.app/Contents/MacOS/Godot"))
+    preferred = [c for c in candidates if c.parent.parent.parent.name == "Godot.app"]
+    for c in preferred + candidates:
+        if c.is_file():
+            return str(c)
+    return ""
+
+
+def load_config(path=None):
+    """Defaults merged with mmx.toml, then agent_tools/mmx.local.toml (machine-specific, gitignored);
+    $MMX_CONFIG / --config replaces both. Empty paths are filled in: [source] project = this repo,
+    [source] godot = find_godot()."""
+    import os
+    import tomllib  # Python 3.11+
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
-    path = Path(path or os.environ.get("MMX_CONFIG") or CONFIG_PATH)
-    if path.exists():
-        import tomllib  # Python 3.11+
-        with open(path, "rb") as f:
-            user = tomllib.load(f)
-        for k, v in user.items():
-            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-                cfg[k].update(v)
-            else:
-                cfg[k] = v
+    explicit = path or os.environ.get("MMX_CONFIG")
+    for p in ([Path(explicit)] if explicit else [CONFIG_PATH, LOCAL_CONFIG_PATH]):
+        if p.exists():
+            with open(p, "rb") as f:
+                _merge(cfg, tomllib.load(f))
+    if not cfg["source"].get("project"):
+        cfg["source"]["project"] = str(REPO)
+    if not cfg["source"].get("godot"):
+        cfg["source"]["godot"] = find_godot()
     return cfg
 
 
@@ -2181,7 +2212,7 @@ def to_unity(ptex, project, name, target=None, size=None, verify=False, editor=N
         rv["editor_open"] = open_pids
     if verify:
         rv["stage"] = "verify"
-        editor = editor or cfg["unity"].get("editor")
+        editor = editor or cfg["unity"].get("editor") or uh.find_editor(project)
         v = uh.verify(editor or "", project, folder, work, verify_timeout or cfg["unity"]["verify_timeout"])
         rv["verify"] = v
         if not v["ok"]:

@@ -1,5 +1,6 @@
-# mmx config: how `mmx export` / `mmx run` call Material Maker.
-# Paths must be absolute. Override the file with $MMX_CONFIG or --config.
+# mmx config: how `mmx export` / `mmx run` call Material Maker. Shared defaults, committed.
+# Machine-specific paths go in agent_tools/mmx.local.toml (gitignored; written by agent_tools/setup.py), which
+# is merged on top of this file. $MMX_CONFIG or --config replaces both. Paths must be absolute; "" = auto.
 
 mode = "source"         # "source": Godot + this repo (parse_args.gd: --json, exit codes, --size).
                         # "release": the installed app (no --size, no JSON, always exits 0).
@@ -16,10 +17,10 @@ binary = "/Applications/Material Maker.app/Contents/MacOS/Material Maker"
 data_dir = "/Applications/Material Maker.app/Contents/MacOS"   # nodes/ used to predict output files
 
 [source]
-godot = "/Applications/Godot.app/Contents/MacOS/Godot"
-project = "/Volumes/External1/Users/bryan/Documents/Material Maker Agent/material-maker"
+godot = ""              # Godot 4.7 executable; "" = auto-detect ($MMX_GODOT, godot on PATH, /Applications/Godot*.app)
+project = ""            # "" = this repo
 
 [unity]
-editor = "/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app/Contents/MacOS/Unity"   # for to-unity --verify
-project = "/Volumes/External1/Users/bryan/Documents/MM-Agent-Test"                   # default --project
+editor = ""             # for to-unity --verify; "" = the Unity Hub editor matching the project's version
+project = ""            # default --project (set it in mmx.local.toml)
 verify_timeout = 900    # seconds; the first batchmode launch imports the whole project
