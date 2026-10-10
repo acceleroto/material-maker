@@ -280,6 +280,9 @@
   after iteration 4. Finding: Unity sometimes crashes on batchmode shutdown after an OK verify report (exit -10) -> `to-unity`
   says ok false with an empty message; rerun passed. Runs in `agent_runs/6.3/<run>/` (gitignored).
 
+- Checkpoint 4 (user, 2026-10-10): phase1 vs phase4 report comparison marked complete (superseded by the 6.3 acceptance
+  run). User reviewed the 7 acceptance materials in Unity: "Those look great."
+
 ## In progress
 - None.
 
@@ -293,4 +296,3 @@
   an OK report" (and maybe retry once) instead of an empty error; start Claude Code in the repo root once to test the
   `mcp__material-maker__*` tools in-chat; skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
   random-length plank layouts; merge `upstream/master` into `agent` when upstream releases.
-- Still open for the user: Checkpoint 4 review (`agent_docs/phase1_report.md` vs `agent_docs/phase4_report.md`).
