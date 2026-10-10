@@ -393,9 +393,36 @@ def license_hints(log_text):
                    if any(p.lower() in l.lower() for p in LICENSE_PATTERNS)})[:10]
 
 
+def _run_unity(cmd, timeout):
+    """Run Unity in its own process group; returns the exit code, None on timeout (group killed)."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                            start_new_session=True)
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        return None
+
+
+def _read_report(path):
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except ValueError:
+        return None
+
+
+def _clean_report(report):
+    return (report is not None and bool(report.get("ok")) and not report.get("errors")
+            and not any(m.get("errors") for m in report.get("materials", [])))
+
+
 def verify(editor, project, folder, work_dir, timeout=900):
     """Run the batchmode verification of `folder` (Assets/...). Returns {"ok", "report", "log", "seconds",
-    "exit_code", "error"?, "license_lines"?}."""
+    "exit_code", "attempts", "error"?, "stage"?, "license_lines"?, "retried_after_exit_code"?}.
+    A clean report with a non-zero exit (Unity crashing on shutdown) is retried once."""
     project = Path(project)
     work_dir = Path(work_dir).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -416,29 +443,35 @@ def verify(editor, project, folder, work_dir, timeout=900):
     cmd = verify_command(editor, project, folder, report_path, log_path)
     rv["command"] = cmd
     start = time.time()
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-                            start_new_session=True)
-    try:
-        rc = proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
-        rc = None
+    for attempt in (1, 2):
+        rc = _run_unity(cmd, timeout)
+        log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
+        report = _read_report(report_path)
+        # Unity sometimes crashes while shutting down batchmode (seen: exit -10, "fatal error in the mono runtime")
+        # after the verifier already wrote a clean report: retry once instead of reporting an empty "problem".
+        if attempt == 1 and _clean_report(report) and rc not in (0, None):
+            rv["retried_after_exit_code"] = rc
+            report_path.unlink(missing_ok=True)
+            continue
+        break
+    rv["attempts"] = attempt
     rv["seconds"] = round(time.time() - start, 1)
     rv["exit_code"] = rc
-    log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
-    report = None
-    if report_path.exists():
-        try:
-            report = json.loads(report_path.read_text())
-        except ValueError:
-            pass
     if report is not None:
         rv["report"] = report
         rv["ok"] = bool(report.get("ok")) and rc == 0
-        if not rv["ok"]:
-            rv["error"] = "verification found problems: " + "; ".join(
-                report.get("errors", []) + [e for m in report.get("materials", []) for e in m.get("errors", [])])
+        if rv["ok"]:
+            return rv
+        problems = report.get("errors", []) + [e for m in report.get("materials", []) for e in m.get("errors", [])]
+        if _clean_report(report) and rc is None:
+            rv["error"] = "the verifier reported OK, but Unity did not quit within %ss (killed; see %s)" % (timeout, log_path)
+        elif _clean_report(report):
+            rv["stage"] = "exit_after_ok_report"
+            rv["error"] = ("the verifier reported OK, but Unity exited with code %s (twice; likely a crash while "
+                           "shutting down batchmode, see %s). The report itself is clean; rerun --verify to confirm"
+                           % (rc, log_path))
+        else:
+            rv["error"] = "verification found problems: " + "; ".join(problems)
         return rv
     lic = license_hints(log_text)
     if lic:

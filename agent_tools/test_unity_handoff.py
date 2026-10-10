@@ -207,10 +207,13 @@ mode = open(arg("-projectPath") + "/fake_mode").read().strip()
 open(arg("-logFile"), "w").write("Unity fake\n" + ("No valid Unity Editor license found\n" if mode == "license" else ""))
 if mode == "license":
     sys.exit(1)
-ok = mode == "ok"
+ok = mode in ("ok", "crash_always", "crash_once")
 rep = {"mm_unity_verify": 1, "ok": ok, "folder": arg("-mmFolder"), "errors": [] if ok else ["no material"],
        "materials": []}
 json.dump(rep, open(arg("-mmReport"), "w"))
+if mode == "crash_always" or (mode == "crash_once" and not __import__("os").path.exists(arg("-projectPath") + "/crashed")):
+    open(arg("-projectPath") + "/crashed", "w").write("1")
+    sys.exit(134)  # clean report written, then a crash on shutdown
 sys.exit(0 if ok else 1)
 """
 
@@ -244,6 +247,23 @@ class TestVerifyFake(unittest.TestCase):
         r = self.run_mode("bad")
         self.assertFalse(r["ok"])
         self.assertIn("no material", r["error"])
+
+    def test_crash_on_shutdown_retried_once(self):
+        r = self.run_mode("crash_once")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["attempts"], r["retried_after_exit_code"], r["exit_code"]), (2, 134, 0))
+
+    def test_crash_on_shutdown_twice(self):
+        r = self.run_mode("crash_always")
+        self.assertFalse(r["ok"])
+        self.assertEqual((r["stage"], r["attempts"], r["exit_code"]), ("exit_after_ok_report", 2, 134))
+        self.assertIn("exited with code 134", r["error"])
+        self.assertTrue(r["report"]["ok"])
+
+    def test_problems_not_retried(self):
+        r = self.run_mode("bad")
+        self.assertEqual(r["attempts"], 1)
+        self.assertNotIn("stage", r)
 
     def test_license(self):
         r = self.run_mode("license")

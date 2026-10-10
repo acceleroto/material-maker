@@ -290,6 +290,13 @@
   byte-identical to `mmx export` of the saved ptex; `mmx compare` works on an MCP render. Files in
   `agent_runs/mcp_check/`. README "MCP server" notes the tools only load with the session in the repo.
 
+- Maintenance (agent, 2026-10-10): `to-unity --verify` shutdown-crash handling (`agent_tools/unity_handoff.py`): a clean
+  verifier report with a non-zero Unity exit is retried once (`retried_after_exit_code`, `attempts`); twice ->
+  `stage: exit_after_ok_report` + error naming the exit code (was `ok: false` with an empty "verification found
+  problems:"); clean report + timeout says so. Unity run split into `_run_unity`/`_read_report`/`_clean_report`.
+  Tests: `test_unity_handoff.py` 24 (+3: crash once -> retried ok, crash twice -> stage, problems not retried), mmx 61.
+  Real run GraniteCliff --verify: ok, 1 attempt, 16.8 s. README "Unity hand-off" step 4 documents it.
+
 ## In progress
 - None.
 
@@ -300,5 +307,5 @@
 - Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
 - User: grade the 7 materials in MM-Agent-Test (ROADMAP 6.3 "Grade it") and hand any fixes to a short follow-up session.
 - Maintenance candidates (from ACCEPTANCE.md "Findings"): `to-unity --verify` should report "Unity exited with code N after
-  an OK report" (and maybe retry once) instead of an empty error (suggested-task chip); skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
+  skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
   random-length plank layouts; merge `upstream/master` into `agent` when upstream releases.

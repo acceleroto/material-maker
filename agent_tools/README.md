@@ -307,6 +307,10 @@ also written to `agent_runs/to-unity/<Name>/to_unity_result.json` (staged export
    3 exception. Log in `agent_runs/to-unity/<Name>/unity_verify.log`. No report + a licensing line in the log →
    `stage: license` + `license_lines` (a working log also has `[Licensing::Module]` lines; only failure phrases
    count). Timeout `[unity] verify_timeout` (900 s; a fresh project import takes ~45 s, a warm run ~10 s).
+   Unity 6000.5 occasionally crashes while shutting down batchmode *after* the verifier wrote a clean report (seen:
+   exit -10, "fatal error in the mono runtime"): a clean report with a non-zero exit is retried once
+   (`retried_after_exit_code`, `attempts: 2`); if it happens twice, `ok: false`, `stage: exit_after_ok_report` and an
+   error naming the exit code (the report itself is still clean).
 
 Licensing: on this machine (Unity Hub signed in, Unity 6000.5.5f1) batchmode needed no extra step: the editor
 connects to the Hub's licensing client.
