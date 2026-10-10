@@ -335,6 +335,19 @@
   New `agent_tools/sync_agents_md.py` regenerates AGENTS.md from the skill (`--check`; reproduced the old file
   exactly before the edit); CLAUDE.md points to it; ARCHITECTURE.md cap updated.
 
+- Maintenance (agent, 2026-10-10): **usable by others.** README.md: fork section on top (what it does, gallery of the 7
+  acceptance materials, "point your agent at it" prompt, setup, what the fork adds, links; upstream README kept
+  below). New `agent_docs/GETTING_STARTED.md` (requirements, install, connecting Claude Code/Codex/other MCP
+  clients, usage, Unity hand-off, commands, troubleshooting). New `agent_tools/setup.py` (Python/Godot check, venv +
+  Pillow, one-time headless `--import`, writes gitignored `agent_tools/mmx.local.toml`, smoke test export + 3D
+  preview + MCP engine). Config is portable: `mmx.toml` has no machine paths ("" = auto: repo, `find_godot()`,
+  `unity_handoff.find_editor()` matching ProjectVersion.txt); `.mcp.json` uses a repo-relative script path
+  (Connected from the repo root); the permission allowlist moved to gitignored `.claude/settings.local.json`
+  (shared settings keep deny rules + MCP enablement); CLAUDE.md/AGENTS.md say up front that maintainer rules are not
+  for users; skill no longer hard-codes the repo path; `.uid` files for our scripts committed and
+  `agent_docs/.gdignore` added. Tests: new `test_setup_config.py` (6), all suites pass. **Verified with two fresh
+  clones from GitHub:** setup exit 0 in ~21 s (import 13 s), preview correct, `mmx run` works, clean `git status`.
+
 ## In progress
 - None.
 
