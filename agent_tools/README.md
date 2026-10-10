@@ -371,6 +371,15 @@ loader dropped (it skips them silently) and about file parameters (`image` node,
 view (3×4096 ≈ 9 s), export ≤ 8192 (bricks at 8192 ≈ 35 s; 16384 textures need GBs of video memory each; the
 CLI `--size` has the same cap). Measured in 5.3, none of these crash the engine: 8192 node render ~5 s, export
 at a non-power-of-two size (3000) works.
+**Hidden-window renders** (fixed 2026-10-10): the engine's window is 1×1 px; once macOS considers it occluded,
+`DisplayServer.window_can_draw()` is false and Godot's main loop keeps running but stops drawing frames, so a
+3D preview waiting for `frame_post_draw` waited forever (the "random" `render_preview` timeouts, also CLI
+`--render-preview` while another engine window sat on top). `cli_preview.gd draw_frame()` now calls
+`RenderingServer.force_draw()` when no frame was drawn within two process frames; outputs are byte-identical.
+**Watchdog:** while a server request runs longer than 15 s, the engine log (stderr) gets a report every 5 s:
+`mm_deps` queue and each unfinished buffer (status, owner node), the renderer's device owner/thread state, and
+frame counters (`process`/`drawn`/`can_draw`). Long first renders after edits on graphs with many buffers (e.g.
+the marble's sub-graph normal maps: ~20 s at 2048) are real work, visible there as buffers in `Updating`.
 **Parameter values** are checked against the definition: float = number,
 numeric string, or an expression of `$` variables (`"$time*0.1"`; other strings would be pasted into GLSL);
 enum = index or value name (`"multiply"`); size = exponent within `first..last`; boolean; color =

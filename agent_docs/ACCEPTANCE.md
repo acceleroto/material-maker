@@ -123,12 +123,12 @@ rough non-metal.
 ---
 
 ## Findings for maintenance
-- **Render hangs on the marble graph (2026-10-10):** through the MCP server, `render_preview` hung (180 s timeout,
-  automatic restart) on the first render after loading the 6.3 marble and again after sub-graph edits; the hung
-  engine stalls in `cli_preview.gd render_meshes`. While that `--serve` engine process was still alive, a CLI
-  `mmx preview` of the same graph also hung (bricks rendered fine); after killing it, CLI renders of this graph worked
-  (8–11 s, one transient `ok: false`). Likely buffer/GPU contention specific to this graph (fast_blur/normal_map buffers
-  inside sub-graphs); not reproduced on simple graphs. The rework was finished with the CLI tools.
+- **Render hangs on the marble graph (2026-10-10) - FIXED same day:** not specific to the marble. The engine's 1×1
+  window gets marked occluded by macOS, `window_can_draw()` turns false, Godot stops drawing frames and the 3D
+  preview waited forever for `frame_post_draw` (2D renders/exports use compute shaders and were unaffected). The
+  marble just made it likely: its slow buffer re-renders after edits gave macOS time to mark the window hidden.
+  `cli_preview.gd` now forces a draw when none happens (`RenderingServer.force_draw`); repro passes (19 s, then
+  0.2 s), CLI preview with a second engine running passes, outputs byte-identical. See README "Server mode".
 - **MCP not exercised in-chat (again).** Start Claude Code in the repo root to load `.mcp.json`. This is still the one
   untested path.
 - **`to-unity --verify` false failure:** Unity can crash during batchmode shutdown *after* the verifier wrote an OK report

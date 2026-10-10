@@ -317,6 +317,16 @@
   preview and all 5 bricks maps byte-identical before/after; Python suites + GUT 51 pass. None of the fixes address the
   --serve render hang (they touch editor UI nodes, not generators/buffers).
 
+- Maintenance (agent, 2026-10-10): **render_preview hang FIXED.** Repro (`agent_runs/hang/seq.py`: load marble,
+  10 rapid sub-graph edits, render_preview -> 40 s timeout every time) + a new server watchdog (`cli_serve.gd`: while
+  a request runs > 15 s, logs mm_deps buffers, renderer state, frame counters every 5 s) showed buffers finished,
+  renderer idle, preview stuck at `await RenderingServer.frame_post_draw` with `drawn` frames frozen at 9 while
+  process frames kept rising and `DisplayServer.window_can_draw() == false`: macOS marks the 1x1 engine window
+  occluded and Godot stops drawing. Fix: `cli_preview.gd draw_frame()` forces `RenderingServer.force_draw()` when no
+  frame is drawn within 2 process frames. Repro now ok (19 s real buffer work, then 0.2 s); CLI preview with another
+  engine running ok (was 180 s hang); bricks/planks previews byte-identical; Python suites + GUT 51 pass. Only our
+  files changed (cli_preview.gd, cli_serve.gd). README "Server mode", ACCEPTANCE finding updated.
+
 ## In progress
 - None.
 
@@ -325,5 +335,5 @@
 
 ## Next step
 - Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
-- Maintenance candidates (from ACCEPTANCE.md "Findings"): investigate the --serve render hang on the marble graph; skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
+- Maintenance candidates (from ACCEPTANCE.md "Findings"): skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
   random-length plank layouts (custom shader node, see random_planks_node.py); merge `upstream/master` into `agent` when upstream releases.

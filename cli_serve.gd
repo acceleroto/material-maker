@@ -50,6 +50,9 @@ var queue : Array[String] = []
 var busy : bool = false
 var stdin_closed : bool = false
 var quitting : bool = false
+var request_method : String = ""
+var request_start : int = 0
+var next_watchdog : int = 0
 
 
 func show_error(message : String, code : int = 1) -> void:
@@ -158,6 +161,30 @@ static func parse_request(data : Variant) -> Dictionary:
 	rv.params = params
 	return rv
 
+const WATCHDOG_FIRST_MS : int = 15000
+const WATCHDOG_EVERY_MS : int = 5000
+
+# Diagnostics for slow/stuck requests: logs the render queue (stderr) while a request runs long
+func _process(_delta : float) -> void:
+	if request_method == "" or Time.get_ticks_msec() < next_watchdog:
+		return
+	next_watchdog = Time.get_ticks_msec()+WATCHDOG_EVERY_MS
+	printerr(watchdog_report())
+
+func watchdog_report() -> String:
+	var lines : PackedStringArray = PackedStringArray()
+	lines.append("watchdog: %s running %.0f s; mm_deps updating=%s scheduled=%s queue=%d" % [ request_method, (Time.get_ticks_msec()-request_start)/1000.0, mm_deps.updating, mm_deps.update_scheduled, mm_deps.get_render_queue_size() ])
+	var user : Variant = mm_renderer.rendering_device_user
+	var user_desc : String = "null" if user == null else ("freed object" if not is_instance_valid(user) else (str(user.get_path()) if user is Node and user.is_inside_tree() else str(user)))
+	lines.append("  frames: process=%d drawn=%d can_draw=%s render_loop=%s window_mode=%d low_processor=%s" % [ Engine.get_process_frames(), Engine.get_frames_drawn(), DisplayServer.window_can_draw(), RenderingServer.render_loop_enabled, DisplayServer.window_get_mode(), OS.low_processor_usage_mode ])
+	lines.append("  renderer: device_user=%s thread_working=%s renderers_enabled=%s free_renderers=%d" % [ user_desc, mm_renderer.rendering_thread_working, mm_renderer.renderers_enabled, mm_renderer.free_renderers.size() ])
+	for b : String in mm_deps.buffers.keys():
+		var buffer = mm_deps.buffers[b]
+		if buffer.status != buffer.Updated:
+			var owner : String = str(buffer.object.get_path()) if buffer.object is Node and buffer.object.is_inside_tree() else str(buffer.object)
+			lines.append("  buffer %s status=%s pending_deps=%d renders=%d object=%s" % [ b, buffer.STATUS[buffer.status], buffer.pending_dependencies, buffer.renders, owner ])
+	return "\n".join(lines)
+
 func handle_line(line : String) -> void:
 	exit_code = 0
 	errors = PackedStringArray()
@@ -172,6 +199,9 @@ func handle_line(line : String) -> void:
 		respond(request.id, false, null, { code="bad_request", message=request.error })
 		return
 	var start : int = Time.get_ticks_msec()
+	request_method = request.method
+	request_start = start
+	next_watchdog = start+WATCHDOG_FIRST_MS
 	var result : Variant = null
 	if not METHODS.has(request.method):
 		fail("unknown_method", "unknown method %s (available: %s)" % [ request.method, ", ".join(METHODS) ])
@@ -182,6 +212,7 @@ func handle_line(line : String) -> void:
 		if errors.is_empty() and not result is Dictionary:
 			# A script error aborts the method without reporting anything
 			fail("internal", "%s failed (script error? see stderr)" % request.method)
+	request_method = ""
 	if errors.is_empty():
 		result.seconds = (Time.get_ticks_msec()-start)/1000.0
 		respond(request.id, true, result, {})

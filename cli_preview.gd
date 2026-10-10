@@ -152,8 +152,7 @@ func render_meshes(material : MMGenMaterial, meshes : Array[String], env_manager
 		object.transform.origin = -(aabb.position+0.5*aabb.size)
 		await material.update_material(object.get_material())
 		for f in 3:
-			await get_tree().process_frame
-		await RenderingServer.frame_post_draw
+			await draw_frame()
 		var image : Image = viewport.get_texture().get_image()
 		if image == null:
 			result = null
@@ -163,6 +162,17 @@ func render_meshes(material : MMGenMaterial, meshes : Array[String], env_manager
 	remove_child(viewport)
 	viewport.free()
 	return result
+
+# Waits until one frame has been drawn. When the OS reports the window as not drawable (macOS marks the
+# 1x1 engine window occluded once other windows cover it), the main loop keeps running but never draws, so
+# frame_post_draw never fires and the render would wait forever: draw explicitly instead.
+func draw_frame() -> void:
+	var drawn : int = Engine.get_frames_drawn()
+	for i in 2:
+		await get_tree().process_frame
+		if Engine.get_frames_drawn() > drawn:
+			return
+	RenderingServer.force_draw(false)
 
 func update_mesh(object : MeshInstance3D) -> void:
 	if not object.has_method("update_mesh"):
