@@ -72,7 +72,7 @@ Ask in plain words. Examples that worked in testing (`agent_docs/ACCEPTANCE.md` 
 - "Match this photo: agent_refs/my_bark.jpg" (put your photos in `agent_refs/`, which is gitignored).
 
 What the agent does (the skill/AGENTS.md describe it in detail): picks the closest of the 43 example graphs in
-`material_maker/examples/`, edits it (or builds new parts), renders the lit 3D preview after every change,
+`material_maker/examples/` (one-line descriptions: [EXAMPLES.md](EXAMPLES.md)), edits it (or builds new parts), renders the lit 3D preview after every change,
 writes a short critique per iteration, and stops when the material matches (usually 4–8 iterations, up to ~20).
 For a photo it matches scale, layout, palette (numerically) and roughness, and asks you to steer after ~4
 iterations. Iteration files go to `agent_runs/` (gitignored): every iteration's `.ptex`, preview and notes.
@@ -91,6 +91,9 @@ correct import settings: albedo sRGB, data maps linear, normal map type). Re-run
 the material in place and keeps its GUIDs, so scenes using it stay linked. `--verify` opens the project in
 Unity batchmode to check the material, shader and textures; **close the Unity editor on that project first**
 (otherwise it reports `editor_open`; without `--verify`, the open editor imports the files when focused).
+`--verify` installs one Editor-only script into your project, `Assets/Editor/MaterialMakerAgent/MMAgentVerify.cs`
+(not included in builds; delete the folder if you don't want it). Setup with `--unity-project` stores that
+project as the default, so later `to-unity` calls can omit `--project`.
 Floors usually want a higher Tiling (e.g. 4×4) on the Unity material; emissive materials only bloom if the
 scene's post-processing Volume has Bloom.
 
@@ -100,16 +103,21 @@ All from the repo root; `python3 agent_tools/mmx.py <command> --help` for option
 
 | Command | What it does |
 |---|---|
-| `mmx validate <ptex>` | static checks + shader compile (run after every edit) |
+| `mmx validate <ptex> [--hide ignored_parameter]` | static checks + shader compile (run after every edit); `--hide` drops the harmless leftover-parameter warnings many examples have |
 | `mmx run <ptex> --run-name <name> [--ref photo]` | one iteration: export Unity maps, 3D preview, contact sheet, notes |
-| `mmx preview <ptex>` | just the lit 3D preview PNG |
+| `mmx preview <ptex> [<ptex> ...]` | the lit 3D preview PNG; several files → one labelled contact image to compare them |
 | `mmx node-preview <ptex> --node <name>` | one node's output (debugging) |
 | `mmx palette <photo>` | dominant colours of a reference photo + a ready gradient |
 | `mmx compare <preview png> --ref <photo>` | photo beside a preview with palette strips |
 | `mmx to-unity <ptex> --project P --name N [--verify]` | deliver into a Unity project |
 | `mmx node <type>` | one node type's ports and parameters |
+| `python3 agent_tools/mm_client.py batch <file.jsonl>` | many engine requests (one JSON per line: `load` with an absolute path, `set_param`, `render_output`, `render_preview`, `save`) through one engine process: the fast path for shell-only agents |
 
-Reference docs: `agent_docs/NODES.md` (node primer), `agent_tools/README.md` (every tool in detail),
+Every `mmx` command prints its full result as JSON on stdout and ends with a one-line `mmx: ...` summary on
+stderr (`... 2>&1 | tail -1` shows whether it worked). The 3D preview is lit (studio lighting, specular,
+tonemapping), so it looks lighter than the flat albedo map on the contact sheet; that's expected.
+
+Reference docs: `agent_docs/EXAMPLES.md` (the 43 example graphs), `agent_docs/NODES.md` (node primer), `agent_tools/README.md` (every tool in detail),
 `agent_docs/ARCHITECTURE.md` (how the pieces fit), `agent_docs/examples_annotated.md` (example graphs explained).
 
 ## Troubleshooting

@@ -14,11 +14,11 @@ python3 -m venv agent_tools/.venv && agent_tools/.venv/bin/pip install pillow
 
 ```
 python3 agent_tools/mmx.py catalog [--static]  # rebuild catalog.json + agent_docs/NODES.md (from the engine)
-python3 agent_tools/mmx.py validate <file.ptex> [--fast] [--timeout S]
+python3 agent_tools/mmx.py validate <file.ptex> [--fast] [--hide CODE]... [--timeout S]
 python3 agent_tools/mmx.py node <type>        # one type's params/ports as JSON
 python3 agent_tools/mmx.py export <file.ptex> --out <dir> [--target "Unity/URP"] [--timeout S] [--keep-meta]
 python3 agent_tools/mmx.py sheet <dir> [--out sheet.png] [--preview preview_3d.png]
-python3 agent_tools/mmx.py preview <ptex> [--mesh sphere+plane] [--env Studio] [--size 512] [--out x.png]
+python3 agent_tools/mmx.py preview <ptex>... [--mesh sphere+plane] [--env Studio] [--size 512] [--out x.png] [--cols 3]
 python3 agent_tools/mmx.py node-preview <ptex> --node NAME [--port N] [--size 512] [--out x.png]
 python3 agent_tools/mmx.py run <file.ptex> --run-name NAME [--note "what changed"] [--no-preview]
 python3 agent_tools/mmx.py wait (<dir> | --run-name NAME) [--timeout S]
@@ -26,7 +26,14 @@ python3 agent_tools/mmx.py to-unity <ptex> --project <Unity root> --name NAME [-
 agent_tools/.venv/bin/python -m unittest agent_tools/test_mmx.py -v   # plain python3 skips the sheet test
                                      # TestRealEngine runs Godot (~1 min); MMX_SKIP_ENGINE=1 skips it
 python3 -m unittest agent_tools/test_unity_handoff.py -v             # no Unity needed (fake editor)
+python3 agent_tools/setup.py [--godot G] [--unity-project P]          # one-time setup + smoke test (GETTING_STARTED)
 ```
+
+Every command prints its JSON result on stdout, then one `mmx: <outcome>` summary line on stderr
+(`2>&1 | tail -1`). `validate --hide ignored_parameter` drops those warnings (leftover parameter names in many
+examples) and reports their count under `hidden`. `preview` with several `.ptex` renders each (default 256 px
+per view) to `agent_runs/preview/<stem>.png` and a labelled contact image (`--out`, default
+`agent_runs/preview/contact.png`; needs Pillow); see `agent_docs/EXAMPLES.md` for the examples rendered that way.
 
 - **catalog**: asks the engine (`--list-nodes`, `--describe-node --all`, see "Engine CLI modes" below;
   ~4 s, needs `mode = "source"`) and overlays that on a Python parse of `addons/material_maker/nodes/*.mmg`,

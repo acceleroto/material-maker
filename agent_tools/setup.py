@@ -145,6 +145,19 @@ def main():
         unity_editor = uh.find_editor(unity_project) or None
     write_local({"source": {"godot": godot}, "unity": {"project": unity_project, "editor": unity_editor}})
     step(rv, "config", True, detail=str(LOCAL.relative_to(REPO)))
+    if unity_project:
+        import unity_handoff as uh
+        try:
+            uh.check_project(unity_project)
+            pipe = uh.detect_pipeline(unity_project)
+            ok_unity, err = True, None
+        except Exception as e:  # noqa: BLE001 (report any problem with the project)
+            pipe, ok_unity, err = {}, False, str(e)
+        step(rv, "unity", ok_unity, project=unity_project, editor=unity_editor or None,
+             pipeline=pipe.get("pipeline"), target=pipe.get("target"),
+             detail="%s pipeline -> %s; editor %s" % (pipe.get("pipeline"), pipe.get("target"),
+                                                      unity_editor or "not found (to-unity works; --verify needs Unity Hub + the project's editor)")
+             if ok_unity else None, error=err)
 
     # 5. smoke test
     if args.skip_test:
@@ -166,7 +179,9 @@ def main():
         rv["ok"] = ok_export and ok_preview and ok_mcp
         rv["preview"] = str(out / "preview.png")
     rv["next"] = ("Ready. Claude Code: start it in %s (the project's .mcp.json registers the material-maker MCP "
-                  "tools; approve them if asked). Other agents: see agent_docs/GETTING_STARTED.md." % REPO
+                  "tools; approve them if asked). Codex / other MCP clients / shell only: see "
+                  "agent_docs/GETTING_STARTED.md \"Connect your agent\". Choosing a start graph: "
+                  "agent_docs/EXAMPLES.md." % REPO
                   if rv["ok"] else "Fix the failed step above and run setup again.")
     print(json.dumps(rv, indent=1))
     return 0 if rv["ok"] else 1

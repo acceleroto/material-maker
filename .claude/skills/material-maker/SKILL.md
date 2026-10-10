@@ -55,21 +55,27 @@ Without the MCP server, use `mmx` as written below.
 1. **Restate the request** as 3–6 checkable traits: macro shape/pattern, colour palette, surface
    relief, roughness/metal, style (realistic vs stylized), scale (how many features per tile).
    With a reference photo, also follow "Matching a reference photo" below.
-2. **Start from the closest existing graph**, never from an empty file. Look in
-   `material_maker/examples/*.ptex` (list them; names are descriptive: `dry_earth`, `wooden_floor`,
-   `wood`, `rusted_metal`, `stone_wall`, `tiles`, `marble`, `metal_pattern*`, ...) and
-   `agent_docs/examples_annotated.md`. Copy it to `agent_runs/<run>/<name>.ptex`; the output files
+2. **Start from the closest existing graph**, never from an empty file. `agent_docs/EXAMPLES.md` lists all
+   43 `material_maker/examples/*.ptex` with a one-line description each (names can mislead: `tiles` is
+   roof tiles), which maps they wire and their metallic default; `agent_docs/examples_annotated.md`
+   explains four of them node by node. Copy it to `agent_runs/<run>/<name>.ptex`; the output files
    are named after the ptex basename. Run it once unchanged as the baseline (iteration 1).
-   When several examples could fit, look before choosing: `mmx preview <example> --size 256` (~2 s each)
-   shows what each one is (in 4.3 this found `metal_pattern_3`, already a riveted panel).
+   When several examples could fit, look before choosing: `mmx preview <a.ptex> <b.ptex> <c.ptex>` renders
+   each (~2 s) into one labelled contact image (`agent_runs/preview/contact.png`; in 4.3 this found
+   `metal_pattern_3`, already a riveted panel).
 3. **Edit one or two things** per iteration with a small Python script (keep it as
    `agent_runs/<run>/edit_NN.py` so the change is reproducible). Helpers worth copying:
    `agent_tools/proto_0.3/g.py` (`Graph(path).set(node, **params)`, `.add(name, type, **params)`,
-   `.wire(from, port, to, port)` which replaces whatever fed that input, `C(r,g,b)`, `G(...)`).
+   `.wire(from, port, to, port)` which replaces whatever fed that input, `C(r,g,b)`, `G(...)`). The folder
+   name has a dot, so import it by path: `sys.path.insert(0, "<repo>/agent_tools/proto_0.3"); from g import
+   Graph, C, G`.
 4. **Validate**: `python3 agent_tools/mmx.py validate <ptex>`. Fix every error; read warnings
    (`overridden_parameter` means your edit will be thrown away on load). After the Python checks pass
    it runs the engine's check (~2 s), which catches shader compile errors (`shader_compile_error`
    names the faulty node); use `--fast` to skip it for quick structural checks between edits.
+   Many examples carry leftover parameter names (`ignored_parameter` warnings, harmless):
+   `--hide ignored_parameter` drops them so real warnings stand out. Every `mmx` command ends with a
+   one-line `mmx: ...` summary on stderr, so `2>&1 | tail -1` shows the outcome.
 5. **Run**: `python3 agent_tools/mmx.py run <ptex> --run-name <run> --note "what changed and why"`.
    Creates `agent_runs/<run>/iter_NNN/` with a ptex copy, `out/` (Unity/URP maps + `.mat`),
    `preview_3d.png` (lit 3D preview), `sheet.png`, `mmx_result.json`. `--run-name` may nest
@@ -96,6 +102,10 @@ Without the MCP server, use `mmx` as written below.
    `from mm_client import MMClient` (`agent_tools/mm_client.py`; `mm.load`, `mm.set_param`, `mm.render_preview`,
    `mm.render_output`, `mm.validate`, `mm.save`; README "Server mode"). Render each value to its own PNG, Read
    them side by side, `mm.save` the winner into the iteration's ptex and continue the loop with `mmx run`.
+   From a shell that can't keep Python running between commands, put the requests in a file, one JSON per
+   line (`{"method": "load", "params": {"path": "<absolute .ptex>"}}`, then `set_param` / `render_output` /
+   `render_preview` / `save` lines; paths absolute) and run `python3 agent_tools/mm_client.py batch <file.jsonl>`:
+   one engine for all of them (6 node renders ~2.5 s), one JSON response per line.
 7. **Decide**: all traits OK → stop and report. Otherwise go to 3 and change the 1–2 things that
    close the biggest gap. If an iteration made it worse, revert to the previous ptex rather than
    stacking fixes on a broken state.
@@ -213,7 +223,13 @@ Map tiles below it, left to right, top to bottom (only maps that were exported a
   albedo/metal/roughness come from the Material node's scalar params and Unity won't get maps for
   them. Wire albedo, roughness and metallic (a `uniform` is fine) if the user wants a full set.
 - **Odd choices in examples.** `dry_earth` wires a noise into *metallic* (0.08–0.45); `wooden_floor`
-  feeds albedo straight into roughness. Fix inherited nonsense like this early.
+  feeds albedo straight into roughness; `tiles` (roof tiles) has Material metallic 1 with no roughness or
+  depth map. `agent_docs/EXAMPLES.md` flags every example whose fixed metallic is non-zero. Fix inherited
+  nonsense like this early.
+- **Preview vs albedo colours.** The 3D preview is lit (studio HDRI + sun, specular, tonemapping), so it
+  looks lighter and a little warmer than the flat albedo tile; judge hue/value against the albedo tile and
+  its palette numbers, the overall look against the preview. Unity will look different again under its own
+  lights and post-processing.
 - **Depth vs height.** Material in 6 is *depth*: white = deeper. The Unity export writes
   `_height.png` = 1 − depth, so on the sheet's height tile white = high. A `normal_map` wants a
   height field (white = high), so feed depth through an inverting `colorize` first, or the relief

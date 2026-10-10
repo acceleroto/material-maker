@@ -73,6 +73,40 @@ class TestFindEditor(unittest.TestCase):
                 self.assertTrue(uh.find_editor(d / "Game").endswith("6000.5.5f1/Unity.app/Contents/MacOS/Unity"))
 
 
+class TestNewcomerHelpers(unittest.TestCase):
+    def test_hide_warnings(self):
+        r = {"ok": True, "warnings": [{"code": "ignored_parameter"}, {"code": "x"}, {"code": "ignored_parameter"}],
+             "static": {"warnings": [{"code": "ignored_parameter"}]}}
+        mmx.hide_warnings(r, ["ignored_parameter"])
+        self.assertEqual(r["warnings"], [{"code": "x"}])
+        self.assertEqual(r["hidden"], {"ignored_parameter": 2})
+        self.assertEqual(r["static"]["warnings"], [])
+        self.assertNotIn("hidden", mmx.hide_warnings({"warnings": [{"code": "x"}]}, ["y"]))
+
+    def test_contact_image(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("needs Pillow (run with agent_tools/.venv/bin/python)")
+        with tempfile.TemporaryDirectory() as d:
+            files = []
+            for i in range(4):
+                f = Path(d) / ("p%d.png" % i)
+                Image.new("RGB", (40, 20), (i * 60, 0, 0)).save(f)
+                files.append(("p%d" % i, f))
+            out = mmx.contact_image(files, Path(d) / "c.png", cols=3)
+            self.assertEqual(Image.open(out).size, (120, 2 * (20 + 18)))
+
+    def test_summary_line_on_stderr(self):
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        o, e = io.StringIO(), io.StringIO()
+        with redirect_stdout(o), redirect_stderr(e):
+            mmx.print_result({"ok": True}, "thing ok")
+        self.assertEqual(o.getvalue().strip(), '{\n "ok": true\n}')
+        self.assertEqual(e.getvalue(), "mmx: thing ok\n")
+
+
 class TestAgentsSync(unittest.TestCase):
     def test_in_sync(self):
         self.assertEqual(sync_agents_md.build(), sync_agents_md.AGENTS.read_text(),

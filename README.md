@@ -51,7 +51,7 @@ register the MCP server with Codex or any MCP client. Full guide:
   hidden windows. Changes to upstream files are kept minimal; upstream is merged regularly.
 
 More: [how it fits together](agent_docs/ARCHITECTURE.md) · [all tools](agent_tools/README.md) ·
-[node reference](agent_docs/NODES.md) · [build log](agent_docs/PROGRESS.md).
+[example graphs](agent_docs/EXAMPLES.md) · [node reference](agent_docs/NODES.md) · [build log](agent_docs/PROGRESS.md).
 Status: tested on macOS (Apple Silicon) with Godot 4.7 and Unity 6000.5; Linux/Windows untested. Same MIT
 license as Material Maker. This fork is not affiliated with the Material Maker project; please don't send
 upstream bug reports about agent features.

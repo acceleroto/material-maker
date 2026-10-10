@@ -348,6 +348,16 @@
   `agent_docs/.gdignore` added. Tests: new `test_setup_config.py` (6), all suites pass. **Verified with two fresh
   clones from GitHub:** setup exit 0 in ~21 s (import 13 s), preview correct, `mmx run` works, clean `git status`.
 
+- Maintenance (agent, 2026-10-10): **newcomer test + fixes.** A fresh subagent given only the README prompt cloned,
+  installed (setup 19 s, all ok), made WeatheredRedRoofTiles in 6 iterations (from `tiles.ptex`) and delivered it into
+  a throwaway Unity copy with `--verify` ok, ~8 min total, via the CLI path (the headless `claude -p` route failed:
+  CLI OAuth expired). Its friction log, fixed: new `agent_docs/EXAMPLES.md` (all 43 examples: description, wired maps,
+  fixed metallic, stale-warning count; from one contact render); `mmx preview a b c` -> labelled contact image;
+  `mmx validate --hide CODE`; one-line `mmx: ...` summary on stderr for validate/export/run/to-unity; setup reports a
+  `unity` step (pipeline, editor) and points to EXAMPLES.md; skill/AGENTS: EXAMPLES.md + multi-preview in step 2, g.py
+  import-by-path snippet, `mm_client.py batch` for shell-only agents, `tiles` odd defaults, preview-vs-albedo colour
+  note; GETTING_STARTED: verifier script note, default project, new commands. Tests: test_setup_config 9; all pass.
+
 ## In progress
 - None.
 

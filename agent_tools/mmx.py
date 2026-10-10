@@ -1212,9 +1212,37 @@ def validate_full(path, cfg=None, fast=False, timeout=None):
     return result
 
 
+def hide_warnings(result, codes):
+    """Drop warnings with these codes from a validate result; counts go to result["hidden"]."""
+    if not codes:
+        return result
+    hidden = {}
+    def keep(w):
+        if w.get("code") in codes:
+            hidden[w["code"]] = hidden.get(w["code"], 0) + 1
+            return False
+        return True
+    result["warnings"] = [w for w in result.get("warnings", []) if keep(w)]
+    for part in ("static", "engine"):
+        if isinstance(result.get(part), dict) and "warnings" in result[part]:
+            result[part]["warnings"] = [w for w in result[part]["warnings"] if w.get("code") not in codes]
+    if hidden:
+        result["hidden"] = hidden
+    return result
+
+
+def print_result(result, summary):
+    """The full JSON result on stdout, then one short summary line on stderr (easy to spot after `2>&1 | tail`)."""
+    print(json.dumps(result, indent=1, ensure_ascii=False), flush=True)
+    print("mmx: " + summary, file=sys.stderr, flush=True)
+
+
 def cmd_validate(args):
-    result = validate_full(args.ptex, load_config(args.config), args.fast, args.timeout)
-    print(json.dumps(result, indent=1, ensure_ascii=False))
+    result = hide_warnings(validate_full(args.ptex, load_config(args.config), args.fast, args.timeout), args.hide)
+    hidden = sum(result.get("hidden", {}).values())
+    print_result(result, "validate %s: %d error(s), %d warning(s)%s" % (
+        "ok" if result["ok"] else "FAILED", len(result.get("errors", [])), len(result.get("warnings", [])),
+        " (+%d hidden)" % hidden if hidden else ""))
     return 0 if result["ok"] else 1
 
 
@@ -1547,7 +1575,9 @@ def run_export(ptex, out_dir, target=None, cfg=None, timeout=None, keep_meta=Fal
 def cmd_export(args):
     res = run_export(args.ptex, args.out, args.target, load_config(args.config), args.timeout,
                      args.keep_meta, args.no_validate, args.size)
-    print(json.dumps(res, indent=1, ensure_ascii=False))
+    print_result(res, "export %s: %d file(s) in %s (%.1f s)%s" % (
+        "ok" if res["ok"] else "FAILED at " + str(res.get("stage")), len(res.get("files") or []),
+        res.get("out_dir"), res.get("seconds") or 0, "" if res["ok"] else ": " + str(res.get("error"))))
     return 0 if res["ok"] else (1 if res["stage"] in ("validate", "plan") else 2)
 
 
@@ -1667,9 +1697,42 @@ def render_preview(ptex, out=None, mesh=None, env=None, size=None, cfg=None, tim
 
 
 def cmd_preview(args):
-    result = render_preview(args.ptex, args.out, args.mesh, args.env, args.size, load_config(args.config), args.timeout)
-    print(json.dumps(result, indent=1, ensure_ascii=False))
-    return 0 if result["ok"] else 1
+    cfg = load_config(args.config)
+    if len(args.ptex) == 1:
+        result = render_preview(args.ptex[0], args.out, args.mesh, args.env, args.size, cfg, args.timeout)
+        print(json.dumps(result, indent=1, ensure_ascii=False))
+        return 0 if result["ok"] else 1
+    # Several graphs: one preview each (agent_runs/preview/<stem>.png) + a labelled contact image to compare them
+    size = args.size or 256
+    results = [render_preview(p, None, args.mesh, args.env, size, cfg, args.timeout) for p in args.ptex]
+    out = Path(args.out) if args.out else RUNS_DIR / "preview" / "contact.png"
+    images = [(Path(p).stem, r["file"]) for p, r in zip(args.ptex, results) if r.get("ok")]
+    contact = contact_image(images, out, cols=args.cols) if images else None
+    summary = {"ok": all(r.get("ok") for r in results), "contact": str(contact) if contact else None,
+               "previews": [{"ptex": p, "ok": r.get("ok"), "file": r.get("file"), "errors": r.get("errors")}
+                            for p, r in zip(args.ptex, results)]}
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+    return 0 if summary["ok"] else 1
+
+
+def contact_image(images, out, cols=3):
+    """Grid of (label, png path) with the label above each image; returns the output path."""
+    from PIL import Image, ImageDraw
+    tiles = [(label, Image.open(f).convert("RGB")) for label, f in images]
+    w = max(t.width for _, t in tiles)
+    h = max(t.height for _, t in tiles)
+    cols = max(1, min(cols, len(tiles)))
+    rows = (len(tiles) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * w, rows * (h + 18)), (28, 28, 28))
+    draw = ImageDraw.Draw(sheet)
+    for i, (label, t) in enumerate(tiles):
+        x, y = (i % cols) * w, (i // cols) * (h + 18)
+        draw.text((x + 4, y + 3), label, fill=(235, 235, 235))
+        sheet.paste(t, (x, y + 18))
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(out)
+    return out
 
 
 def cmd_node_preview(args):
@@ -2135,7 +2198,9 @@ def cmd_run(args):
     res = run_iteration(args.ptex, args.run_name, args.target, load_config(args.config), args.timeout,
                         note=args.note, size=args.size, preview=False if args.no_preview else None,
                         reference=args.ref)
-    print(json.dumps(res, indent=1, ensure_ascii=False))
+    print_result(res, "run %s: %s (sheet %s)%s" % (
+        "ok" if res["ok"] else "FAILED", res.get("iter_dir"), res.get("sheet"),
+        "" if res["ok"] else ": " + str(res.get("error"))))
     return 0 if res["ok"] else 2
 
 
@@ -2228,7 +2293,11 @@ def cmd_to_unity(args):
     if RUNS_DIR.is_dir() and res.get("work_dir"):
         Path(res["work_dir"]).mkdir(parents=True, exist_ok=True)
         _write_json(Path(res["work_dir"]) / "to_unity_result.json", res)
-    print(json.dumps(res, indent=1, ensure_ascii=False))
+    v = res.get("verify")
+    print_result(res, "to-unity %s: %s (target %s)%s%s" % (
+        "ok" if res["ok"] else "FAILED at " + str(res.get("stage")), res.get("material"), res.get("target"),
+        "" if not isinstance(v, dict) else "; verify %s" % ("ok" if v.get("ok") else "FAILED: " + str(v.get("error"))),
+        "" if res["ok"] or isinstance(v, dict) else ": " + str(res.get("error"))))
     return 0 if res["ok"] else 1
 
 
@@ -2243,7 +2312,8 @@ def cmd_wait(args):
 def _ensure_pillow(cmd):
     """sheet/run/palette/compare need Pillow: re-exec under agent_tools/.venv if the current python lacks it."""
     import os
-    if cmd not in ("sheet", "run", "palette", "compare"):  # preview/node-preview need no Pillow
+    multi_preview = cmd == "preview" and sum(a.endswith(".ptex") for a in sys.argv[2:]) > 1
+    if cmd not in ("sheet", "run", "palette", "compare") and not multi_preview:  # single previews need no Pillow
         return
     try:
         import PIL  # noqa: F401
@@ -2265,6 +2335,9 @@ def main(argv=None):
     p = sub.add_parser("validate", help="validate a .ptex file (Python checks, then the engine's); JSON result, exit 0/1")
     p.add_argument("ptex")
     p.add_argument("--fast", action="store_true", help="Python checks only (no Godot launch, no shader compile)")
+    p.add_argument("--hide", action="append", default=[], metavar="CODE",
+                   help="drop warnings with this code (repeatable; e.g. ignored_parameter: harmless leftovers "
+                        "in many examples); counts are kept in \"hidden\"")
     p.add_argument("--timeout", type=float, help="seconds before the engine check is killed (default from mmx.toml)")
     p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
     p.set_defaults(fn=cmd_validate)
@@ -2286,12 +2359,15 @@ def main(argv=None):
     p.add_argument("--no-validate", action="store_true", help="skip mmx validate")
     export_opts(p)
     p.set_defaults(fn=cmd_export)
-    p = sub.add_parser("preview", help="lit 3D preview PNG of a .ptex (engine, source mode); JSON, exit 0/1")
-    p.add_argument("ptex")
+    p = sub.add_parser("preview", help="lit 3D preview PNG of a .ptex (engine, source mode); JSON, exit 0/1. "
+                                      "Several .ptex: one labelled contact image to compare them (needs Pillow)")
+    p.add_argument("ptex", nargs="+")
+    p.add_argument("--cols", type=int, default=3, help="contact image columns (several .ptex)")
     p.add_argument("--mesh", help="sphere, plane, cube or several joined with + (default from mmx.toml: sphere+plane)")
     p.add_argument("--env", help="environment name or index (default from mmx.toml: Studio)")
     p.add_argument("--size", type=int, help="pixels per view (default from mmx.toml: 512)")
-    p.add_argument("--out", help="output PNG (default agent_runs/preview/<ptex stem>.png)")
+    p.add_argument("--out", help="output PNG (default agent_runs/preview/<ptex stem>.png; several .ptex: "
+                                 "agent_runs/preview/contact.png)")
     p.add_argument("--timeout", type=float, help="seconds before Godot is killed (default from mmx.toml)")
     p.add_argument("--config", help="config file (default agent_tools/mmx.toml or $MMX_CONFIG)")
     p.set_defaults(fn=cmd_preview)
