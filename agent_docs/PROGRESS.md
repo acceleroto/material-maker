@@ -297,6 +297,13 @@
   Tests: `test_unity_handoff.py` 24 (+3: crash once -> retried ok, crash twice -> stage, problems not retried), mmx 61.
   Real run GraniteCliff --verify: ok, 1 attempt, 16.8 s. README "Unity hand-off" step 4 documents it.
 
+- Maintenance (agent, 2026-10-10): CarraraMarbleTiles rework (user: fix the graphic veins, up to ~20 iterations OK):
+  9 iterations in `agent_runs/marble2/` (summary.md): ridged simplex vein source + blurred haze + cooler vein colour in
+  both Marble sub-graphs; re-delivered to MM-Agent-Test under the same name, `--verify` OK; ACCEPTANCE.md updated
+  (row, notes, preview, new finding). **Finding:** `render_preview` via MCP/`--serve` hung twice on this graph (180 s
+  timeout + auto-restart), and a CLI preview hung while that engine process lived; CLI worked after killing it.
+  Not investigated further; repro = load `agent_runs/6.3/marble/marble.ptex` in the MCP server and render_preview.
+
 ## In progress
 - None.
 
@@ -305,5 +312,6 @@
 
 ## Next step
 - Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
-- Maintenance candidates (from ACCEPTANCE.md "Findings"): skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
+- Next user request: rework PlanksPhotoMatch seam layout (random plank lengths instead of the alternating stagger).
+- Maintenance candidates (from ACCEPTANCE.md "Findings"): investigate the --serve render hang on the marble graph; skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
   random-length plank layouts; merge `upstream/master` into `agent` when upstream releases.

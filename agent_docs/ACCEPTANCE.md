@@ -26,7 +26,7 @@ then crashed during shutdown (exit -10, "fatal error in the mono runtime"). An i
 | 2 | ChippedPaintMetal | text, man-made, realistic | rusted_metal | 6 | 2.1 min | success |
 | 3 | StylizedLava | text, natural, stylized | lava | 5 | 1.9 min | success |
 | 4 | SciFiFloorPanels | text, man-made, stylized | metal_pattern_3 | 4 | 1.7 min | success |
-| 5 | CarraraMarbleTiles | text, man-made, realistic | marble | 6 | 4.5 min | partial (graphic veins) |
+| 5 | CarraraMarbleTiles | text, man-made, realistic | marble | 6 (+9 rework) | 4.5 min (+27) | success after rework (2026-10-10) |
 | 6 | BarkPhotoMatch | photo (ambientCG Bark012, CC0) | dry_earth | 7 | 5.1 min* | convincing match |
 | 7 | PlanksPhotoMatch | photo (ambientCG Planks023A, CC0) | wooden_floor | 6 | 2.8 min* | convincing at a glance; layout off |
 
@@ -87,6 +87,11 @@ rough non-metal.
   veins came out slightly wider in the last iteration. It needed edits *inside* sub-graphs (`nodes`/`connections` of a
   `graph` node), which the g.py helper doesn't cover. The tiny white sparkles are the example's scratch normal, kept on
   purpose. Normal/height are flat apart from the grout (correct for polished stone).
+- **Rework (2026-10-10, user request, 9 more iterations, ~27 min of which ~10 min were engine hangs):** veins rebuilt
+  from ridged simplex noise (thin, continuous, varying width) with a blurred copy lightened over them as a soft grey
+  haze, and a cooler blue-grey vein colour; the contour-like secondary veins are gone. The preview above is the new
+  version; re-delivered under the same name (GUIDs kept), `--verify` OK. Details: `agent_runs/marble2/summary.md`.
+  Still off: veins in each sub-graph run in a similar direction.
 
 ## 6. BarkPhotoMatch: photo reference, ambientCG Bark012
 ![BarkPhotoMatch](acceptance/BarkPhotoMatch.jpg) *(photo centre square | 3D preview)*
@@ -112,6 +117,12 @@ rough non-metal.
 ---
 
 ## Findings for maintenance
+- **Render hangs on the marble graph (2026-10-10):** through the MCP server, `render_preview` hung (180 s timeout,
+  automatic restart) on the first render after loading the 6.3 marble and again after sub-graph edits; the hung
+  engine stalls in `cli_preview.gd render_meshes`. While that `--serve` engine process was still alive, a CLI
+  `mmx preview` of the same graph also hung (bricks rendered fine); after killing it, CLI renders of this graph worked
+  (8–11 s, one transient `ok: false`). Likely buffer/GPU contention specific to this graph (fast_blur/normal_map buffers
+  inside sub-graphs); not reproduced on simple graphs. The rework was finished with the CLI tools.
 - **MCP not exercised in-chat (again).** Start Claude Code in the repo root to load `.mcp.json`. This is still the one
   untested path.
 - **`to-unity --verify` false failure:** Unity can crash during batchmode shutdown *after* the verifier wrote an OK report
