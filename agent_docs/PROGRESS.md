@@ -310,6 +310,13 @@
   Luma 0.31 vs photo 0.32. Re-delivered under the same name, `--verify` OK; ACCEPTANCE.md updated. All CLI tools (no
   MCP hangs this time; MCP not used to avoid the marble hang).
 
+- Maintenance (agent, 2026-10-10): merged upstream/master (20 commits = 10 upstream fixes, all editor UI/memory: flexible
+  tabs leak, generic node preview cleanup, save-all crash, pixels editor crash, post-process panel, 3D preview clear-bg,
+  tones close button, minimize undo, kuwahara missing buffer). No file overlaps with ours. Our render path is unaffected
+  (environment_manager change only applies with a bg colour, which cli_preview never passes): bricks preview, planks
+  preview and all 5 bricks maps byte-identical before/after; Python suites + GUT 51 pass. None of the fixes address the
+  --serve render hang (they touch editor UI nodes, not generators/buffers).
+
 ## In progress
 - None.
 
