@@ -327,6 +327,14 @@
   engine running ok (was 180 s hang); bricks/planks previews byte-identical; Python suites + GUT 51 pass. Only our
   files changed (cli_preview.gd, cli_serve.gd). README "Server mode", ACCEPTANCE finding updated.
 
+- Maintenance (agent, 2026-10-10): skill notes. SKILL.md: iteration budget 8 -> up to ~20 (stop after 3 iterations
+  without visible progress; photo runs still ask the user to steer after ~4); new pitfalls: blur conventions
+  (directional_blur2 -90 = up, sigma in node-grid pixels; fast_blur sigma ~60), fine/ridged noise with fbm4,
+  editing inside sub-graphs (MCP `parent`/`graph/node`; ptex `nodes`/`connections`; remote paramN), custom GLSL
+  `shader` nodes (example random_planks_node.py); MCP section: slow first render after edits + engine-log watchdog.
+  New `agent_tools/sync_agents_md.py` regenerates AGENTS.md from the skill (`--check`; reproduced the old file
+  exactly before the edit); CLAUDE.md points to it; ARCHITECTURE.md cap updated.
+
 ## In progress
 - None.
 
@@ -335,5 +343,6 @@
 
 ## Next step
 - Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
-- Maintenance candidates (from ACCEPTANCE.md "Findings"): skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
-  random-length plank layouts (custom shader node, see random_planks_node.py); merge `upstream/master` into `agent` when upstream releases.
+- Maintenance: merge `upstream/master` into `agent` when upstream releases (user runs GitHub "Sync fork" on master first).
+- Optional ideas: Unity review scene with all materials; promote the Random Planks shader to a library node;
+  `mmx edit` command that can edit inside sub-graphs; a material-variants flow; Phase 7 upstream reports (user).

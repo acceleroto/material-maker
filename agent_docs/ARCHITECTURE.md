@@ -62,7 +62,7 @@ plan and history: `ROADMAP.md`, `PROGRESS.md`.
 
 ## Knowledge for the agent (`agent_docs/`, `.claude/skills/`)
 - **`.claude/skills/material-maker/SKILL.md`** (copied into **`AGENTS.md`** for Codex): the iteration loop (closest
-  example → edit → render the 3D preview → critique → repeat, cap 8), pitfalls, MCP vs `mmx` usage.
+  example → edit → render the 3D preview → critique → repeat, up to ~20), pitfalls, MCP vs `mmx` usage.
 - **`NODES.md`** (curated node reference + .ptex primer), `catalog.json` (all node types, ports, parameters),
   `examples_annotated.md`; phase reports and `phase0_notes.md` hold findings.
 

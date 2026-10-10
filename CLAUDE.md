@@ -85,6 +85,8 @@ step, update PROGRESS.md, commit, push. Don't start large new steps late in a se
   on re-export; clean texture metas. `--verify` = Unity batchmode check (editor must be closed on that project).
   Unity 6000.5.5f1: `/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app/Contents/MacOS/Unity` (`mmx.toml [unity]`).
 - Component overview: `agent_docs/ARCHITECTURE.md`.
+- After editing `.claude/skills/material-maker/SKILL.md`, run `python3 agent_tools/sync_agents_md.py` (AGENTS.md
+  mirrors the skill body; `--check` reports drift).
 - `mmx export` / `sheet` / `run` / `wait`: see `agent_tools/README.md`; config in `agent_tools/mmx.toml`.
   `sheet`/`run` need Pillow in `agent_tools/.venv` (setup line in the README).
 

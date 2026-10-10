@@ -43,9 +43,13 @@ per `mmx run`), and render tools **return the image directly** (no Read needed).
   made since replayed (the error says so); the failed call is not repeated, so change it (smaller size, other
   edit) rather than retrying it as is. `save` often: it is the recovery point. Heed load/validate warnings
   about unknown node types or missing image files (those render blank).
+- The first `render_preview` after edits on a graph with many buffers (blurs, normal maps inside sub-graphs)
+  can take ~20 s at 2048: that's real buffer work, not a hang. If a request seems stuck, the engine log
+  (`agent_runs/mcp/engine.log`) gets `watchdog:` lines every 5 s after 15 s: unfinished buffers, renderer
+  state, frame counters.
 Without the MCP server, use `mmx` as written below.
 
-## The loop (cap: 8 iterations; stop earlier when it matches)
+## The loop (up to ~20 iterations; stop earlier when it matches)
 
 1. **Restate the request** as 3–6 checkable traits: macro shape/pattern, colour palette, surface
    relief, roughness/metal, style (realistic vs stylized), scale (how many features per tile).
@@ -159,7 +163,7 @@ Expectations:
   one-off features (a specific stain, a logo) are out of scope for a tileable procedural material.
 - **After ~4 iterations, stop and ask the user to steer:** show the latest sheet (photo beside the preview),
   list what matches, the 1–3 biggest remaining differences and what you'd change next, and ask what matters
-  most to them (or whether it's good enough). Continue with their answer, within the 8-iteration cap.
+  most to them (or whether it's good enough). Continue with their answer, within the ~20-iteration budget.
 - In `summary.md`, include reference vs albedo luma and palette, and which differences are left on purpose.
 
 ## Reading the contact sheet
@@ -225,6 +229,26 @@ Map tiles below it, left to right, top to bottom (only maps that were exported a
   instance in a `tx`×`ty` grid fills one cell at scale 1/tx. Voronoi `Borders` distance grows with
   cell size, so changing `voronoi.scale` changes crack width for the same colorize threshold.
   Change scale *or* width per iteration, not both.
+- **Blur conventions.** `directional_blur2.param2` (angle) is in texture space: **-90 points up, +90 down**
+  (rust streaks running down from chips need +90). Sigma is in pixels of the node's own grid (`param0`), so
+  the same sigma on a smaller grid = a longer blur relative to the tile (grid 256 = 4× longer than 1024).
+  `fast_blur.param1` (sigma, default 100) is on a much larger scale: 10 is invisible, ~60 gives a soft halo.
+- **Fine noise.** `fbm4.scale_x/y` max out at 32; for finer grain raise `lacunarity` (e.g. 4) with high
+  `persistence` (0.9+), not lower persistence (that leaves only the coarse octave: camo blotches).
+  Ridged lines (marble veins, cracks): `fbm4` `noise` 2 (Simplex), `folds` 1, low scale (1–3), 4 octaves,
+  then a `colorize` that is light only near 0. Non-integer scales still tile for `fbm4`; check edges anyway.
+- **Editing inside sub-graphs** (`graph` nodes, e.g. the Marble/Tiles nodes in `marble.ptex`): with the MCP
+  tools use `add_node parent=<graph>` and node paths `<graph>/<node>` for `connect`/`set_param`/
+  `render_output`. In a `.ptex` edit script, change the graph node's own `nodes`/`connections` lists (the
+  `proto_0.3/g.py` helper only edits the top level). The sub-graph's exposed `paramN` (its
+  `gen_parameters` remote) override the inner nodes they drive, so change those instead (expected
+  `overridden_parameter` warnings).
+- **When no built-in node fits, write a shader node.** A `.ptex` node of type `shader` carries its own GLSL
+  (`shader_model`: `global` functions, `code` per pixel, `outputs` expressions with `$uv` and `$param`, and
+  `parameters`); MM's `rand2()` is available. Make it a drop-in for the node it replaces (same output ports
+  and types) so downstream wiring stays. Worked example: `agent_tools/proto_0.3/random_planks_node.py`
+  (rows of planks with a random offset and random plank lengths, replacing the legacy `bricks`, whose
+  stagger only alternates every other row). Validate: shader errors show as `shader_compile_error`.
 - **Port types.** `f`, `rgb`, `rgba` convert automatically (a colorize can feed a math `f` input);
   `fill`, `sdf2d` etc. don't.
 - **Tileability.** Generators in MM tile, but `transform` without `repeat: true`, non-integer
@@ -238,4 +262,5 @@ Map tiles below it, left to right, top to bottom (only maps that were exported a
 
 - Don't edit files in `material_maker/examples/` or `addons/`; copy into `agent_runs/`.
 - Don't make many changes in one iteration: you won't know which one helped.
-- Don't exceed 8 iterations; report what's left instead.
+- Don't go past ~20 iterations, and don't keep going when 3 iterations in a row made no visible progress:
+  report what's left (or ask the user to steer) instead. Most requests converge in 4–8.
