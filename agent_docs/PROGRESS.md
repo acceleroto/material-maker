@@ -306,6 +306,5 @@
 ## Next step
 - Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
 - User: grade the 7 materials in MM-Agent-Test (ROADMAP 6.3 "Grade it") and hand any fixes to a short follow-up session.
-- Maintenance candidates (from ACCEPTANCE.md "Findings"): `to-unity --verify` should report "Unity exited with code N after
-  skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
+- Maintenance candidates (from ACCEPTANCE.md "Findings"): skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
   random-length plank layouts; merge `upstream/master` into `agent` when upstream releases.
