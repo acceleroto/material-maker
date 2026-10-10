@@ -455,7 +455,10 @@ and the images of render steps) and `restart`. `render_preview` / `render_output
 path so it works from any subdirectory) and `"enabledMcpjsonServers": ["material-maker"]` in
 `.claude/settings.json` (no approval prompt). Tools appear as `mcp__material-maker__<tool>`; check with
 `claude mcp get material-maker` (should say Connected; that doesn't start the engine). On another machine,
-fix the path in `.mcp.json` and the paths in `mmx.toml`.
+fix the path in `.mcp.json` and the paths in `mmx.toml`. The tools only load when the session's working
+directory is the repo (or below it): start Claude Code there, or in the desktop app move an existing session into
+the repo folder; the tools appear on the next turn (checked in-chat 2026-10-10: images show inline, preview ~0.5 s,
+edit + preview in one `batch` ~0.2 s, MCP export byte-identical to `mmx export`).
 
 **Codex** (user scope, `~/.codex/config.toml`):
 ```bash

@@ -283,6 +283,13 @@
 - Checkpoint 4 (user, 2026-10-10): phase1 vs phase4 report comparison marked complete (superseded by the 6.3 acceptance
   run). User reviewed the 7 acceptance materials in Unity: "Those look great."
 
+- Maintenance (agent, 2026-10-10): in-chat MCP check DONE. Session moved into the repo root -> `mcp__material-maker__*`
+  loaded next turn. On bricks.ptex: load 1.9 s (engine start), render_preview 256 0.54 s with the image inline in chat,
+  batch (set_param mortar gradient -> blue + render_preview) 0.18 s and the change visible, render_output `graph/Bricks`
+  (sub-graph node) 0.05 s, validate ok 0.19 s (34 outputs), save, export 512 0.88 s. All 5 MCP-exported maps are
+  byte-identical to `mmx export` of the saved ptex; `mmx compare` works on an MCP render. Files in
+  `agent_runs/mcp_check/`. README "MCP server" notes the tools only load with the session in the repo.
+
 ## In progress
 - None.
 
@@ -293,6 +300,5 @@
 - Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
 - User: grade the 7 materials in MM-Agent-Test (ROADMAP 6.3 "Grade it") and hand any fixes to a short follow-up session.
 - Maintenance candidates (from ACCEPTANCE.md "Findings"): `to-unity --verify` should report "Unity exited with code N after
-  an OK report" (and maybe retry once) instead of an empty error; start Claude Code in the repo root once to test the
-  `mcp__material-maker__*` tools in-chat; skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
+  an OK report" (and maybe retry once) instead of an empty error (suggested-task chip); skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
   random-length plank layouts; merge `upstream/master` into `agent` when upstream releases.
