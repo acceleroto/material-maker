@@ -28,7 +28,7 @@ then crashed during shutdown (exit -10, "fatal error in the mono runtime"). An i
 | 4 | SciFiFloorPanels | text, man-made, stylized | metal_pattern_3 | 4 | 1.7 min | success |
 | 5 | CarraraMarbleTiles | text, man-made, realistic | marble | 6 (+9 rework) | 4.5 min (+27) | success after rework (2026-10-10) |
 | 6 | BarkPhotoMatch | photo (ambientCG Bark012, CC0) | dry_earth | 7 | 5.1 min* | convincing match |
-| 7 | PlanksPhotoMatch | photo (ambientCG Planks023A, CC0) | wooden_floor | 6 | 2.8 min* | convincing at a glance; layout off |
+| 7 | PlanksPhotoMatch | photo (ambientCG Planks023A, CC0) | wooden_floor | 6 (+6 rework) | 2.8 min* (+4) | convincing match after rework (2026-10-10) |
 
 \* includes waiting for the user's steering answer. Total: 41 iterations (cap 56).
 
@@ -113,6 +113,12 @@ rough non-metal.
 - **Still off:** the seams follow a regular alternating stagger, because legacy `bricks` and `bricks3` only offset every
   other row, while the photo has random plank lengths. No knots. The grain is a little finer and more uniform than the
   photo's soft streaks. `normal_map.param1` (0.2 → 0.08) made no visible difference; `Material.normal` did.
+- **Rework (2026-10-10, user request, 6 more iterations):** the legacy `bricks` layout was replaced by a custom
+  `shader` node ("Random Planks", GLSL in the .ptex) that gives every row a random offset and one or two planks of
+  random length, as a drop-in for the bricks outputs. Each plank also got its own grain offset, the grain is broader
+  and softer, and there are sparse soft knots. Albedo luma 0.31 ± 0.03 vs photo 0.32 ± 0.02. The preview above is the
+  new version; re-delivered under the same name, `--verify` OK. Details: `agent_runs/planks2/summary.md`. Still off: the
+  photo's seams are mostly tone changes with fainter lines.
 
 ---
 

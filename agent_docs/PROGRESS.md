@@ -304,6 +304,12 @@
   timeout + auto-restart), and a CLI preview hung while that engine process lived; CLI worked after killing it.
   Not investigated further; repro = load `agent_runs/6.3/marble/marble.ptex` in the MCP server and render_preview.
 
+- Maintenance (agent, 2026-10-10): PlanksPhotoMatch rework: 6 iterations (`agent_runs/planks2/summary.md`). Legacy bricks
+  replaced by a custom GLSL `shader` node "Random Planks" (per-row random offset, 1-2 planks of random length; generator
+  script kept as `agent_tools/proto_0.3/random_planks_node.py`), per-plank grain offset, softer grain, sparse knots.
+  Luma 0.31 vs photo 0.32. Re-delivered under the same name, `--verify` OK; ACCEPTANCE.md updated. All CLI tools (no
+  MCP hangs this time; MCP not used to avoid the marble hang).
+
 ## In progress
 - None.
 
@@ -312,6 +318,5 @@
 
 ## Next step
 - Done: the roadmap is complete (Phase 7 is optional and user-driven). Maintenance mode.
-- Next user request: rework PlanksPhotoMatch seam layout (random plank lengths instead of the alternating stagger).
 - Maintenance candidates (from ACCEPTANCE.md "Findings"): investigate the --serve render hang on the marble graph; skill notes for `directional_blur2` angle/sigma, editing nodes inside sub-graphs,
-  random-length plank layouts; merge `upstream/master` into `agent` when upstream releases.
+  random-length plank layouts (custom shader node, see random_planks_node.py); merge `upstream/master` into `agent` when upstream releases.
